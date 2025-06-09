@@ -280,6 +280,7 @@ class SearchResultParser:
         author_filter: Optional[str] = None,
         format_filter: Optional[str] = None,
         min_quality: bool = True,
+        epub_only: bool = False,
     ) -> List[BookDetail]:
         """
         Filter and sort search results.
@@ -289,11 +290,20 @@ class SearchResultParser:
             author_filter: Filter by author name
             format_filter: Filter by file format
             min_quality: If True, prefer non-archive formats
+            epub_only: If True, only return EPUB files (openbooks pattern)
 
         Returns:
             Filtered and sorted list
         """
+        if results is None:
+            return []
+
         filtered = results.copy()
+
+        # EPUB-only filter (openbooks alignment)
+        if epub_only:
+            filtered = [r for r in filtered if r.format.lower() == "epub"]
+            print(f"[PARSER] EPUB-only filter: {len(filtered)} results remaining")
 
         # Author filter
         if author_filter:
@@ -310,7 +320,7 @@ class SearchResultParser:
             filtered = [r for r in filtered if r.format.lower() == format_lower]
 
         # Quality filter - prefer non-archive formats
-        if min_quality:
+        if min_quality and not epub_only:  # Skip if epub_only already applied
             # Separate archives and non-archives
             non_archives = [
                 r for r in filtered if r.format not in self.ARCHIVE_EXTENSIONS
@@ -323,11 +333,11 @@ class SearchResultParser:
             else:
                 filtered = archives
 
-        # Sort by server and format preference
-        format_priority = {"epub": 1, "pdf": 2, "mobi": 3, "txt": 4}
+        # Sort by server and format preference (epub gets highest priority)
+        format_priority = {"epub": 1, "mobi": 2, "azw3": 3, "pdf": 4, "txt": 5}
 
         def sort_key(book: BookDetail) -> Tuple[int, str, str]:
-            format_score = format_priority.get(book.format, 5)
+            format_score = format_priority.get(book.format, 6)
             return (format_score, book.author.lower(), book.title.lower())
 
         filtered.sort(key=sort_key)

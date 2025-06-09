@@ -639,19 +639,32 @@ class IRCSession:
             return {"success": False, "error": error_msg}
 
     def _extract_zip(self, zip_path: str) -> List[str]:
-        """Extract a zip file and return list of extracted files."""
+        """Extract a zip file and return list of extracted EPUB files only (openbooks pattern)."""
         extracted_files = []
         try:
             extract_dir = os.path.splitext(zip_path)[0] + "_extracted"
             os.makedirs(extract_dir, exist_ok=True)
 
             with zipfile.ZipFile(zip_path, "r") as zip_file:
-                zip_file.extractall(extract_dir)
-                extracted_files = [
-                    os.path.join(extract_dir, name) for name in zip_file.namelist()
+                # Filter for .epub files only (openbooks alignment)
+                epub_files = [
+                    name
+                    for name in zip_file.namelist()
+                    if name.lower().endswith(".epub")
                 ]
 
-            print(f"[IRC] Extracted {len(extracted_files)} files to {extract_dir}")
+                if not epub_files:
+                    print(f"[IRC] No EPUB files found in zip archive: {zip_path}")
+                    return extracted_files
+
+                # Extract only EPUB files
+                for epub_file in epub_files:
+                    zip_file.extract(epub_file, extract_dir)
+                    extracted_files.append(os.path.join(extract_dir, epub_file))
+
+                print(
+                    f"[IRC] Extracted {len(extracted_files)} EPUB files to {extract_dir}"
+                )
 
         except Exception as e:
             print(f"[IRC] Extraction failed: {e}")
@@ -701,6 +714,131 @@ class IRCSession:
             "last_command_time": self.last_command_time,
             "is_healthy": self.is_healthy(),
         }
+
+    def search_epub_only(self, search_query: str, max_results: int = 50) -> List[Dict]:
+        """
+        Search for books and return only EPUB results (openbooks pattern).
+
+        Args:
+            search_query: The search term
+            max_results: Maximum number of results to return
+
+        Returns:
+            List of BookDetail objects for EPUB files only
+        """
+        print(f"[IRC] Searching for EPUB files only: '{search_query}'")
+
+        # Perform standard search (correct parameter order: author first)
+        results = self.search_books(search_query, None, max_results)
+
+        # Filter for EPUB only using the search_parser
+        if hasattr(self, "search_parser"):
+            # Convert dict results back to BookDetail objects for filtering
+            book_objects = []
+            for result in results:
+                if isinstance(result, dict):
+                    # Create a mock BookDetail-like object for filtering
+                    book_obj = type(
+                        "BookDetail",
+                        (),
+                        {
+                            "format": result.get("format", "unknown"),
+                            "author": result.get("author", ""),
+                            "title": result.get("title", ""),
+                            "server": result.get("server", ""),
+                            "size": result.get("size", ""),
+                            "full_command": result.get("download_command", ""),
+                            "raw_line": result.get("raw_line", ""),
+                        },
+                    )()
+                    book_objects.append(book_obj)
+
+            epub_book_objects = self.search_parser.filter_results(
+                book_objects, epub_only=True, min_quality=True
+            )
+
+            # Convert back to dict format
+            epub_results = []
+            for book in epub_book_objects:
+                epub_results.append(
+                    {
+                        "server": book.server,
+                        "author": book.author,
+                        "title": book.title,
+                        "format": book.format,
+                        "size": book.size,
+                        "download_command": book.full_command,
+                        "raw_line": book.raw_line,
+                        "parsed_at": datetime.now().isoformat(),
+                    }
+                )
+        else:
+            # Fallback filter if search_parser not available
+            epub_results = [r for r in results if r.get("format", "").lower() == "epub"]
+
+        print(
+            f"[IRC] Found {len(epub_results)} EPUB results out of {len(results)} total"
+        )
+        return epub_results
+
+    def download_epub_only(
+        self, download_command: str, output_dir: Optional[str] = None
+    ) -> dict:
+        """
+        Download a file and ensure it's an EPUB (openbooks pattern).
+
+        Args:
+            download_command: IRC download command
+            output_dir: Directory to save the file
+
+        Returns:
+            Download result dictionary with success status
+        """
+        print(f"[IRC] Starting EPUB-only download: {download_command}")
+
+        # Perform standard download
+        result = self.download_file(download_command, output_dir)
+
+        if result.get("success") and "file_path" in result:
+            file_path = result["file_path"]
+
+            # Check if it's an EPUB file
+            if file_path.lower().endswith(".epub"):
+                print(f"[IRC] Downloaded EPUB file: {file_path}")
+                return result
+
+            # If it's a zip, extract only EPUB files
+            elif file_path.lower().endswith(".zip"):
+                print(f"[IRC] Extracting EPUB files from zip: {file_path}")
+                epub_files = self._extract_zip(file_path)
+
+                if epub_files:
+                    result["extracted_files"] = epub_files
+                    result["epub_count"] = len(epub_files)
+                    print(f"[IRC] Successfully extracted {len(epub_files)} EPUB files")
+                    return result
+                else:
+                    error_msg = "No EPUB files found in archive"
+                    print(f"[IRC] {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "file_path": file_path,
+                    }
+
+            # Non-EPUB file downloaded
+            else:
+                error_msg = f"Downloaded file is not EPUB format: {file_path}"
+                print(f"[IRC] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "file_path": file_path,
+                    "note": "File downloaded but not EPUB format",
+                }
+
+        # Download failed
+        return result
 
 
 # Global session manager
@@ -806,3 +944,42 @@ def list_active_sessions() -> List[Dict]:
         for session_id, session in _active_sessions.items():
             sessions.append({"session_id": session_id, "status": session.get_status()})
         return sessions
+
+
+def search_epub_only(session_id: str, search_query: str, max_results: int = 50) -> Dict:
+    """Search for EPUB books only (openbooks pattern)."""
+    session = get_session(session_id)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+
+    if not session.connected:
+        return {"success": False, "error": "Session not connected"}
+
+    try:
+        results = session.search_epub_only(search_query, max_results)
+        return {
+            "success": True,
+            "results": results,
+            "epub_count": len(results),
+            "session_status": session.get_status(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def download_epub_only(
+    session_id: str, download_command: str, output_dir: Optional[str] = None
+) -> Dict:
+    """Download a file ensuring it's EPUB format only (openbooks pattern)."""
+    session = get_session(session_id)
+    if not session:
+        return {"success": False, "error": "Session not found"}
+
+    if not session.connected:
+        return {"success": False, "error": "Session not connected"}
+
+    try:
+        result = session.download_epub_only(download_command, output_dir)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}

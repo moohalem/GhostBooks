@@ -224,6 +224,79 @@ export class IRCSearchManager {
             throw error;
         }
     }
+    
+    /**
+     * Search for EPUB books only (openbooks pattern)
+     */
+    async searchEpubOnly(searchQuery, maxResults = 50) {
+        try {
+            const sessionId = await this.getOrCreateSession();
+            const response = await apiRequest('/api/irc/search/epub', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    session_id: sessionId,
+                    search_query: searchQuery,
+                    max_results: maxResults
+                })
+            });
+            
+            this.activeSearches.set(searchQuery, { 
+                status: 'searching', 
+                startTime: Date.now(),
+                sessionId: sessionId,
+                epubOnly: true
+            });
+            
+            if (response.success) {
+                showToast(`EPUB search completed: ${response.epub_count} books found`, 'success');
+            } else {
+                showToast(`EPUB search failed: ${response.error}`, 'danger');
+            }
+            
+            return response;
+        } catch (error) {
+            showToast(`Failed to start EPUB search for "${searchQuery}"`, 'danger');
+            throw error;
+        }
+    }
+    
+    /**
+     * Search for EPUB books by author only
+     */
+    async searchAuthorEpubOnly(author, maxResults = 50) {
+        return await this.searchEpubOnly(author, maxResults);
+    }
+    
+    /**
+     * Download EPUB file only (openbooks pattern)
+     */
+    async downloadEpubOnly(sessionId, downloadCommand, outputDir = null) {
+        try {
+            const response = await apiRequest('/api/irc/download/epub', {
+                method: 'POST',
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    download_command: downloadCommand,
+                    output_dir: outputDir
+                })
+            });
+            
+            if (response.success) {
+                if (response.epub_count && response.epub_count > 1) {
+                    showToast(`EPUB download completed: ${response.epub_count} files extracted`, 'success');
+                } else {
+                    showToast('EPUB download completed successfully', 'success');
+                }
+            } else {
+                showToast(`EPUB download failed: ${response.error}`, 'danger');
+            }
+            
+            return response;
+        } catch (error) {
+            showToast('Failed to download EPUB file', 'danger');
+            throw error;
+        }
+    }
 }
 
 /**
