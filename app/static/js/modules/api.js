@@ -146,6 +146,64 @@ export async function clearMissingBooksDatabase() {
 }
 
 /**
+ * Ignore a book (removes it from missing books and adds to ignored list)
+ * @param {string} author - Author name
+ * @param {string} title - Book title
+ * @returns {Promise<Object>} Ignore result
+ */
+export async function ignoreBook(author, title) {
+    return await apiRequest('/api/book/ignore', {
+        method: 'POST',
+        body: JSON.stringify({ author, title })
+    });
+}
+
+/**
+ * Unignore a book (removes it from ignored list)
+ * @param {string} author - Author name
+ * @param {string} title - Book title
+ * @returns {Promise<Object>} Unignore result
+ */
+export async function unignoreBook(author, title) {
+    return await apiRequest('/api/book/unignore', {
+        method: 'POST',
+        body: JSON.stringify({ author, title })
+    });
+}
+
+/**
+ * Check if a book is ignored
+ * @param {string} author - Author name
+ * @param {string} title - Book title
+ * @returns {Promise<Object>} Ignore status
+ */
+export async function getBookIgnoreStatus(author, title) {
+    const params = new URLSearchParams({ author, title });
+    return await apiRequest(`/api/book/ignore_status?${params}`);
+}
+
+/**
+ * Get all ignored books
+ * @param {string|null} author - Optional author filter
+ * @returns {Promise<Array>} Ignored books list
+ */
+export async function getIgnoredBooks(author = null) {
+    const params = new URLSearchParams();
+    if (author) {
+        params.append('author', author);
+    }
+    return await apiRequest(`/api/ignored_books?${params}`);
+}
+
+/**
+ * Get ignored books statistics
+ * @returns {Promise<Object>} Ignored books stats
+ */
+export async function getIgnoredBooksStats() {
+    return await apiRequest('/api/ignored_books/stats');
+}
+
+/**
  * Search authors for autocomplete
  * @param {string} query - Search query
  * @returns {Promise<Array>} Matching authors

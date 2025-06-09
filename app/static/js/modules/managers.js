@@ -586,4 +586,84 @@ ${data.errors && data.errors.length > 0 ? `⚠️ ${data.errors.length} errors o
         div.textContent = text;
         return div.innerHTML;
     }
+    
+    /**
+     * Start population process for different types
+     * @param {string} type - Type of population ('metadata', 'library', 'missing-books')
+     */
+    startPopulation(type) {
+        this.openModal();
+        
+        switch (type) {
+            case 'metadata':
+                this.addToLog('Starting metadata database initialization...', 'info');
+                this.startMetadataPopulation();
+                break;
+            case 'library':
+                this.addToLog('Starting library database population...', 'info');
+                this.startLibraryPopulation();
+                break;
+            case 'missing-books':
+                this.addToLog('Starting missing books database population...', 'info');
+                this.startStreaming();
+                break;
+            default:
+                this.addToLog(`Unknown population type: ${type}`, 'error');
+                break;
+        }
+    }
+    
+    /**
+     * Start metadata database population
+     */
+    async startMetadataPopulation() {
+        try {
+            const response = await fetch('/api/populate_database', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.addToLog('Metadata database populated successfully', 'success');
+                this.showCloseButton();
+            } else {
+                this.addToLog(`Error: ${data.error}`, 'error');
+                this.showCloseButton();
+            }
+        } catch (error) {
+            this.addToLog(`Error: ${error.message}`, 'error');
+            this.showCloseButton();
+        }
+    }
+    
+    /**
+     * Start library database population
+     */
+    async startLibraryPopulation() {
+        try {
+            const response = await fetch('/api/populate_library', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.addToLog('Library database populated successfully', 'success');
+                this.showCloseButton();
+            } else {
+                this.addToLog(`Error: ${data.error}`, 'error');
+                this.showCloseButton();
+            }
+        } catch (error) {
+            this.addToLog(`Error: ${error.message}`, 'error');
+            this.showCloseButton();
+        }
+    }
 }

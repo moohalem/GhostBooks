@@ -479,6 +479,35 @@ window.searchSingleBook = async function(author, title) {
     }
 };
 
+// Modal management functions
+window.minimizeProgressModal = function() {
+    const modal = document.getElementById('populationProgressModal');
+    if (modal) {
+        modal.style.display = 'none';
+        Utils.showToast('Population progress minimized', 'info');
+    }
+};
+
+window.clearProgressLog = function() {
+    const progressLog = document.getElementById('progress-log');
+    if (progressLog) {
+        progressLog.innerHTML = '';
+        Utils.showToast('Progress log cleared', 'info');
+    }
+};
+
+window.cancelPopulation = async function() {
+    if (progressModalManager) {
+        await progressModalManager.cancel();
+    }
+};
+
+window.closeProgressModal = function() {
+    if (progressModalManager) {
+        progressModalManager.close();
+    }
+};
+
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', initializeApp);
 

@@ -29,7 +29,16 @@ from app.services.database import (
     update_missing_books,
     verify_calibre_database,
 )
-from app.services.irc import get_search_status, start_irc_search
+from app.services.irc import (
+    get_search_status,
+    start_irc_search,
+    create_irc_session,
+    get_session_status,
+    search_and_download,
+    download_from_result,
+    close_session,
+    list_active_sessions,
+)
 from app.services.openlibrary import compare_author_books
 from config.config_manager import config_manager
 
@@ -1133,3 +1142,306 @@ def get_populate_status():
     """API endpoint to get current population status."""
     global populate_progress
     return jsonify(populate_progress)
+
+
+# ============== IGNORE BOOKS FUNCTIONALITY ==============
+
+
+@api_bp.route("/book/ignore", methods=["POST"])
+def ignore_book_api():
+    """API endpoint to ignore a missing book."""
+    try:
+        from app.services.database import ignore_book
+
+        data = request.get_json()
+        if not data or "author" not in data or "title" not in data:
+            return jsonify(
+                {"success": False, "error": "Author and title are required"}
+            ), 400
+
+        author = data["author"]
+        title = data["title"]
+        db_path = current_app.config["DB_PATH"]
+
+        success = ignore_book(db_path, author, title)
+
+        if success:
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"Successfully ignored '{title}' by {author}",
+                }
+            )
+        else:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to ignore book",
+                }
+            ), 500
+
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error ignoring book: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/book/unignore", methods=["POST"])
+def unignore_book_api():
+    """API endpoint to unignore a book."""
+    try:
+        from app.services.database import unignore_book
+
+        data = request.get_json()
+        if not data or "author" not in data or "title" not in data:
+            return jsonify(
+                {"success": False, "error": "Author and title are required"}
+            ), 400
+
+        author = data["author"]
+        title = data["title"]
+        db_path = current_app.config["DB_PATH"]
+
+        success = unignore_book(db_path, author, title)
+
+        if success:
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"Successfully unignored '{title}' by {author}",
+                }
+            )
+        else:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Book was not in ignored list",
+                }
+            ), 404
+
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error unignoring book: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/book/ignore_status")
+def check_ignore_status_api():
+    """API endpoint to check if a book is ignored."""
+    try:
+        from app.services.database import is_book_ignored
+
+        author = request.args.get("author")
+        title = request.args.get("title")
+
+        if not author or not title:
+            return jsonify(
+                {"success": False, "error": "Author and title parameters are required"}
+            ), 400
+
+        db_path = current_app.config["DB_PATH"]
+        is_ignored = is_book_ignored(db_path, author, title)
+
+        return jsonify(
+            {
+                "success": True,
+                "author": author,
+                "title": title,
+                "is_ignored": is_ignored,
+            }
+        )
+
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error checking ignore status: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/ignored_books")
+def get_ignored_books_api():
+    """API endpoint to get all ignored books."""
+    try:
+        from app.services.database import get_ignored_books
+
+        author = request.args.get("author")
+        db_path = current_app.config["DB_PATH"]
+
+        ignored_books = get_ignored_books(db_path, author)
+
+        # Group by author if no specific author requested
+        if not author:
+            authors_ignored = {}
+            for book in ignored_books:
+                book_author = book["author"]
+                if book_author not in authors_ignored:
+                    authors_ignored[book_author] = []
+                authors_ignored[book_author].append(
+                    {
+                        "title": book["title"],
+                        "ignored_at": book["ignored_at"],
+                    }
+                )
+            return jsonify(
+                {
+                    "success": True,
+                    "ignored_books": authors_ignored,
+                    "total_count": len(ignored_books),
+                }
+            )
+        else:
+            return jsonify(
+                {
+                    "success": True,
+                    "author": author,
+                    "ignored_books": ignored_books,
+                    "count": len(ignored_books),
+                }
+            )
+
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error fetching ignored books: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/ignored_books/stats")
+def get_ignored_books_stats_api():
+    """API endpoint to get ignored books statistics."""
+    try:
+        from app.services.database import get_ignored_books_stats
+
+        db_path = current_app.config["DB_PATH"]
+        stats = get_ignored_books_stats(db_path)
+
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error fetching ignored books stats: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/missing_books/clear", methods=["POST"])
+def clear_missing_books_api():
+    """API endpoint to clear missing books database."""
+    try:
+        from app.services.database import clear_missing_books
+
+        data = request.get_json() or {}
+        author = data.get("author")
+        db_path = current_app.config["DB_PATH"]
+
+        deleted_count = clear_missing_books(db_path, author)
+
+        if author:
+            message = f"Cleared {deleted_count} missing books for {author}"
+        else:
+            message = f"Cleared {deleted_count} missing books from database"
+
+        return jsonify(
+            {
+                "success": True,
+                "message": message,
+                "deleted_count": deleted_count,
+            }
+        )
+
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error clearing missing books: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/irc/sessions", methods=["POST"])
+def create_irc_session_endpoint():
+    """API endpoint to create a new IRC session."""
+    try:
+        # Create IRC session
+        session_id = create_irc_session()
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "IRC session created",
+                "session_id": session_id,
+            }
+        ), 201
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/sessions/<session_id>", methods=["GET"])
+def get_irc_session_status_endpoint(session_id):
+    """API endpoint to get the status of an IRC session."""
+    try:
+        status = get_session_status(session_id)
+        return jsonify({"success": True, "session_id": session_id, "status": status})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/sessions/active", methods=["GET"])
+def list_active_irc_sessions_endpoint():
+    """API endpoint to list all active IRC sessions."""
+    try:
+        sessions = list_active_sessions()
+        return jsonify({"success": True, "active_sessions": sessions})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/sessions/<session_id>/close", methods=["POST"])
+def close_irc_session_endpoint(session_id):
+    """API endpoint to close an IRC session."""
+    try:
+        success = close_session(session_id)
+
+        if success:
+            return jsonify(
+                {"success": True, "message": f"IRC session {session_id} closed"}
+            )
+        else:
+            return jsonify(
+                {"success": False, "error": "Session not found"}
+            ), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/search", methods=["POST"])
+def search_and_download_endpoint():
+    """API endpoint to perform search and download in IRC."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        author = data.get("author")
+        title = data.get("title")  # optional
+
+        if not session_id or not author:
+            return jsonify({"success": False, "error": "Session ID and author are required"}), 400
+
+        # Perform search
+        result = search_and_download(session_id, author, title)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/download", methods=["POST"])
+def download_from_result_endpoint():
+    """API endpoint to download a file from IRC search results."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        download_command = data.get("download_command")
+        filename = data.get("filename")  # optional
+
+        if not session_id or not download_command:
+            return jsonify({"success": False, "error": "Session ID and download command are required"}), 400
+
+        # Perform download
+        result = download_from_result(session_id, download_command, filename)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500

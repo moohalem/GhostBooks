@@ -318,12 +318,18 @@ def get_author_books(db_path: str, author_name: str) -> List[Dict[str, Any]]:
 
 
 def get_missing_books(db_path: str) -> List[Dict[str, str]]:
-    """Get all books marked as missing."""
+    """Get all books marked as missing, excluding ignored books."""
+    ensure_ignored_books_table(db_path)
+
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT author, title FROM author_book WHERE missing = 1 ORDER BY author, title"
-    )
+    cursor.execute("""
+        SELECT ab.author, ab.title 
+        FROM author_book ab
+        LEFT JOIN ignored_books ib ON ab.author = ib.author AND ab.title = ib.title
+        WHERE ab.missing = 1 AND ib.id IS NULL
+        ORDER BY ab.author, ab.title
+    """)
     missing_books = [{"author": row[0], "title": row[1]} for row in cursor.fetchall()]
     conn.close()
     return missing_books
@@ -974,7 +980,7 @@ def store_missing_books(db_path: str, author: str, missing_books: List[str]) -> 
 
 def get_missing_books_by_author(db_path: str, author: str) -> List[Dict[str, Any]]:
     """
-    Get all missing books for a specific author.
+    Get all missing books for a specific author, excluding ignored books.
 
     Args:
         db_path: Path to the database
@@ -984,16 +990,18 @@ def get_missing_books_by_author(db_path: str, author: str) -> List[Dict[str, Any
         List of missing books with metadata
     """
     ensure_missing_book_table(db_path)
+    ensure_ignored_books_table(db_path)
 
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        SELECT title, discovered_at, source 
-        FROM missing_book 
-        WHERE author = ? 
-        ORDER BY discovered_at DESC
+        SELECT mb.title, mb.discovered_at, mb.source 
+        FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE mb.author = ? AND ib.id IS NULL
+        ORDER BY mb.discovered_at DESC
         """,
         (author,),
     )
@@ -1011,7 +1019,7 @@ def get_all_missing_books(
     db_path: str, limit: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
-    Get all missing books from the database.
+    Get all missing books from the database, excluding ignored books.
 
     Args:
         db_path: Path to the database
@@ -1021,14 +1029,17 @@ def get_all_missing_books(
         List of missing books with metadata
     """
     ensure_missing_book_table(db_path)
+    ensure_ignored_books_table(db_path)
 
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
 
     query = """
-        SELECT author, title, discovered_at, source 
-        FROM missing_book 
-        ORDER BY discovered_at DESC
+        SELECT mb.author, mb.title, mb.discovered_at, mb.source 
+        FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE ib.id IS NULL
+        ORDER BY mb.discovered_at DESC
     """
 
     if limit:
@@ -1047,7 +1058,7 @@ def get_all_missing_books(
 
 def get_missing_book_stats(db_path: str) -> Dict[str, Any]:
     """
-    Get statistics about missing books in the database.
+    Get statistics about missing books in the database, excluding ignored books.
 
     Args:
         db_path: Path to the database
@@ -1056,30 +1067,42 @@ def get_missing_book_stats(db_path: str) -> Dict[str, Any]:
         Dictionary with missing book statistics
     """
     ensure_missing_book_table(db_path)
+    ensure_ignored_books_table(db_path)
 
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
 
-    # Total missing books
-    cursor.execute("SELECT COUNT(*) FROM missing_book")
+    # Total missing books (excluding ignored)
+    cursor.execute("""
+        SELECT COUNT(*) FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE ib.id IS NULL
+    """)
     total_missing = cursor.fetchone()[0]
 
-    # Authors with missing books
-    cursor.execute("SELECT COUNT(DISTINCT author) FROM missing_book")
+    # Authors with missing books (excluding ignored)
+    cursor.execute("""
+        SELECT COUNT(DISTINCT mb.author) FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE ib.id IS NULL
+    """)
     authors_with_missing = cursor.fetchone()[0]
 
-    # Recent discoveries (last 7 days)
+    # Recent discoveries (last 7 days, excluding ignored)
     cursor.execute("""
-        SELECT COUNT(*) FROM missing_book 
-        WHERE discovered_at >= datetime('now', '-7 days')
+        SELECT COUNT(*) FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE mb.discovered_at >= datetime('now', '-7 days') AND ib.id IS NULL
     """)
     recent_discoveries = cursor.fetchone()[0]
 
-    # Top authors with most missing books
+    # Top authors with most missing books (excluding ignored)
     cursor.execute("""
-        SELECT author, COUNT(*) as missing_count 
-        FROM missing_book 
-        GROUP BY author 
+        SELECT mb.author, COUNT(*) as missing_count 
+        FROM missing_book mb
+        LEFT JOIN ignored_books ib ON mb.author = ib.author AND mb.title = ib.title
+        WHERE ib.id IS NULL
+        GROUP BY mb.author 
         ORDER BY missing_count DESC 
         LIMIT 10
     """)
@@ -1123,3 +1146,203 @@ def clear_missing_books(db_path: str, author: Optional[str] = None) -> int:
     conn.close()
 
     return deleted_count
+
+
+def ensure_ignored_books_table(db_path: str) -> None:
+    """Ensure the ignored_books table exists for storing ignored missing books."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ignored_books (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author TEXT NOT NULL,
+            title TEXT NOT NULL,
+            ignored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(author, title)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def ignore_book(db_path: str, author: str, title: str) -> bool:
+    """
+    Add a book to the ignored list and remove it from missing books.
+
+    Args:
+        db_path: Path to the database
+        author: Author name
+        title: Book title
+
+    Returns:
+        bool: True if successfully ignored, False otherwise
+    """
+    ensure_ignored_books_table(db_path)
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        # Add to ignored_books table (using INSERT OR IGNORE to handle duplicates)
+        cursor.execute(
+            "INSERT OR IGNORE INTO ignored_books (author, title) VALUES (?, ?)",
+            (author, title),
+        )
+
+        # Remove from missing_book table if it exists there
+        cursor.execute(
+            "DELETE FROM missing_book WHERE author = ? AND title = ?", (author, title)
+        )
+
+        # Update author_book table to set missing = 0 if it exists there
+        cursor.execute(
+            "UPDATE author_book SET missing = 0 WHERE author = ? AND title = ?",
+            (author, title),
+        )
+
+        conn.commit()
+        return True
+
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def unignore_book(db_path: str, author: str, title: str) -> bool:
+    """
+    Remove a book from the ignored list.
+
+    Args:
+        db_path: Path to the database
+        author: Author name
+        title: Book title
+
+    Returns:
+        bool: True if successfully unignored, False otherwise
+    """
+    ensure_ignored_books_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "DELETE FROM ignored_books WHERE author = ? AND title = ?", (author, title)
+        )
+
+        conn.commit()
+        return cursor.rowcount > 0
+
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def is_book_ignored(db_path: str, author: str, title: str) -> bool:
+    """
+    Check if a book is in the ignored list.
+
+    Args:
+        db_path: Path to the database
+        author: Author name
+        title: Book title
+
+    Returns:
+        bool: True if book is ignored, False otherwise
+    """
+    ensure_ignored_books_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT 1 FROM ignored_books WHERE author = ? AND title = ? LIMIT 1",
+        (author, title),
+    )
+
+    result = cursor.fetchone() is not None
+    conn.close()
+    return result
+
+
+def get_ignored_books(
+    db_path: str, author: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get all ignored books, optionally filtered by author.
+
+    Args:
+        db_path: Path to the database
+        author: Optional author name to filter by
+
+    Returns:
+        List of ignored books with metadata
+    """
+    ensure_ignored_books_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    if author:
+        cursor.execute(
+            "SELECT author, title, ignored_at FROM ignored_books WHERE author = ? ORDER BY ignored_at DESC",
+            (author,),
+        )
+    else:
+        cursor.execute(
+            "SELECT author, title, ignored_at FROM ignored_books ORDER BY ignored_at DESC"
+        )
+
+    books = [
+        {"author": row[0], "title": row[1], "ignored_at": row[2]}
+        for row in cursor.fetchall()
+    ]
+
+    conn.close()
+    return books
+
+
+def get_ignored_books_stats(db_path: str) -> Dict[str, Any]:
+    """
+    Get statistics about ignored books.
+
+    Args:
+        db_path: Path to the database
+
+    Returns:
+        Dictionary with ignored book statistics
+    """
+    ensure_ignored_books_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    # Total ignored books
+    cursor.execute("SELECT COUNT(*) FROM ignored_books")
+    total_ignored = cursor.fetchone()[0]
+
+    # Authors with ignored books
+    cursor.execute("SELECT COUNT(DISTINCT author) FROM ignored_books")
+    authors_with_ignored = cursor.fetchone()[0]
+
+    # Recent ignores (last 7 days)
+    cursor.execute("""
+        SELECT COUNT(*) FROM ignored_books 
+        WHERE ignored_at >= datetime('now', '-7 days')
+    """)
+    recent_ignores = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "total_ignored": total_ignored,
+        "authors_with_ignored": authors_with_ignored,
+        "recent_ignores": recent_ignores,
+    }

@@ -19,7 +19,10 @@ import {
     loadAuthorDetail,
     loadDatabaseInfo,
     loadMetadataInfo,
-    refreshOlidCacheStats
+    refreshOlidCacheStats,
+    ignoreBook,
+    unignoreBook,
+    getBookIgnoreStatus
 } from './api.js';
 
 /**
@@ -217,7 +220,14 @@ export async function loadAuthorBooks(accordionBody, authorName) {
                     <div class="flex-grow-1">
                         <span class="${book.status === 'missing_local' ? 'text-danger' : ''}">${escapeHtml(book.title)}</span>
                     </div>
-                    <div class="ms-2">
+                    <div class="d-flex align-items-center ms-2">
+                        ${book.status === 'missing_local' ? `
+                            <button class="btn btn-sm btn-outline-danger me-2" 
+                                    onclick="handleIgnoreBook('${escapeHtml(authorName)}', '${escapeHtml(book.title)}')"
+                                    title="Ignore this missing book">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        ` : ''}
                         <i class="${statusIcon} ${statusClass}" 
                            title="${statusText}"
                            data-bs-toggle="tooltip"></i>
@@ -390,6 +400,13 @@ async function loadMissingBooksData() {
                                         ${discoveredDate ? `<small class="text-muted d-block mt-1"><i class="fas fa-calendar"></i> ${discoveredDate}</small>` : ''}
                                         <small class="text-muted d-block"><i class="fas fa-database"></i> ${book.source || 'legacy'}</small>
                                     </div>
+                                    <div class="ms-2">
+                                        <button class="btn btn-sm btn-outline-danger" 
+                                                onclick="handleIgnoreBook('${escapeHtml(author)}', '${escapeHtml(book.title)}')"
+                                                title="Ignore this book">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         `;
@@ -561,6 +578,15 @@ function updateAuthorBooksTable(books) {
                     ${book.missing ? 'Missing' : 'Available'}
                 </span>
             </td>
+            <td>
+                ${book.missing ? `
+                    <button class="btn btn-sm btn-outline-danger" 
+                            onclick="handleIgnoreBook('${escapeHtml(window.currentAuthor)}', '${escapeHtml(book.title)}')"
+                            title="Ignore this missing book">
+                        <i class="fas fa-times"></i> Ignore
+                    </button>
+                ` : ''}
+            </td>
         </tr>
     `).join('');
     
@@ -577,6 +603,13 @@ function updateAuthorMissingBooksTable(missingBooks) {
             <td>${escapeHtml(book.title)}</td>
             <td>
                 <span class="badge bg-warning">Missing</span>
+            </td>
+            <td>
+                <button class="btn btn-sm btn-outline-danger" 
+                        onclick="handleIgnoreBook('${escapeHtml(window.currentAuthor)}', '${escapeHtml(book.title)}')"
+                        title="Ignore this missing book">
+                    <i class="fas fa-times"></i> Ignore
+                </button>
             </td>
         </tr>
     `).join('');
@@ -733,6 +766,71 @@ export function selectAuthorFromAccordion(authorName) {
     }
 }
 
+/**
+ * Handle ignoring a book
+ * @param {string} author - Author name
+ * @param {string} title - Book title
+ */
+async function handleIgnoreBook(author, title) {
+    try {
+        showLoading(true);
+        
+        // Show confirmation dialog
+        const confirmed = confirm(`Are you sure you want to ignore "${title}" by ${author}? This book will be removed from the missing books list.`);
+        
+        if (!confirmed) {
+            showLoading(false);
+            return;
+        }
+        
+        // Call the ignore book API
+        await ignoreBook(author, title);
+        
+        // Show success message
+        showToast(`Successfully ignored "${title}" by ${author}`, 'success');
+        
+        // Refresh the current view
+        await refreshCurrentView();
+        
+    } catch (error) {
+        console.error('Error ignoring book:', error);
+        showToast(`Failed to ignore book: ${error.message}`, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+/**
+ * Refresh the current view based on the active page
+ */
+async function refreshCurrentView() {
+    const activeNav = document.querySelector('.nav-link.active');
+    
+    if (!activeNav) return;
+    
+    const activeView = activeNav.getAttribute('data-view');
+    
+    switch (activeView) {
+        case 'dashboard':
+            await showDashboard();
+            break;
+        case 'authors':
+            await showAuthors();
+            break;
+        case 'missing':
+            await showMissing();
+            break;
+        case 'settings':
+            await showSettings();
+            break;
+    }
+    
+    // If we're on author detail page, reload the author
+    if (window.currentAuthor) {
+        await showAuthorDetail(window.currentAuthor);
+    }
+}
+
 // Global exports for backwards compatibility
 window.showDashboard = showDashboard;
 window.showAuthors = showAuthors;
@@ -741,3 +839,4 @@ window.showSettings = showSettings;
 window.showAuthorDetail = showAuthorDetail;
 window.loadAuthorBooks = loadAuthorBooks;
 window.selectAuthorFromAccordion = selectAuthorFromAccordion;
+window.handleIgnoreBook = handleIgnoreBook;

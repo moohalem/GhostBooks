@@ -9,6 +9,7 @@ venv.bak/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
+.pytest_cache/
 
 # Distribution / packaging
 .Python
@@ -29,11 +30,7 @@ wheels/
 *.egg
 MANIFEST
 
-
-.pytest_cache/
-
 # Data directory (runtime databases)
-data/
 *.db
 
 .vscode
