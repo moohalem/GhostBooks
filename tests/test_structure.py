@@ -27,7 +27,7 @@ def test_imports():
 
         # Test services
         from app.services.database import initialize_database
-        from app.services.irc import connect_to_irc
+        from app.services.irc import create_irc_session
         from app.services.openlibrary import get_author_key
 
         print("✅ Services import successful")

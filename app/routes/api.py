@@ -30,14 +30,12 @@ from app.services.database import (
     verify_calibre_database,
 )
 from app.services.irc import (
-    get_search_status,
-    start_irc_search,
-    create_irc_session,
-    get_session_status,
-    search_and_download,
-    download_from_result,
     close_session,
+    create_irc_session,
+    download_from_result,
+    get_session_status,
     list_active_sessions,
+    search_and_download,
 )
 from app.services.openlibrary import compare_author_books
 from config.config_manager import config_manager
@@ -397,34 +395,6 @@ def compare_author(author_name):
                 }
             )
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@api_bp.route("/search_author_irc", methods=["POST"])
-def search_author_irc():
-    """API endpoint to start IRC search for an author."""
-    try:
-        data = request.get_json()
-        author = data.get("author")
-
-        if not author:
-            return jsonify({"error": "Author name required"}), 400
-
-        search_id = start_irc_search(author)
-        return jsonify(
-            {"search_id": search_id, "message": f"IRC search started for {author}"}
-        ), 202
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@api_bp.route("/search_status/<search_id>")
-def get_search_status_endpoint(search_id):
-    """API endpoint to get IRC search status."""
-    try:
-        status = get_search_status(search_id)
-        return jsonify(status)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1400,9 +1370,7 @@ def close_irc_session_endpoint(session_id):
                 {"success": True, "message": f"IRC session {session_id} closed"}
             )
         else:
-            return jsonify(
-                {"success": False, "error": "Session not found"}
-            ), 404
+            return jsonify({"success": False, "error": "Session not found"}), 404
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1417,7 +1385,9 @@ def search_and_download_endpoint():
         title = data.get("title")  # optional
 
         if not session_id or not author:
-            return jsonify({"success": False, "error": "Session ID and author are required"}), 400
+            return jsonify(
+                {"success": False, "error": "Session ID and author are required"}
+            ), 400
 
         # Perform search
         result = search_and_download(session_id, author, title)
@@ -1437,7 +1407,12 @@ def download_from_result_endpoint():
         filename = data.get("filename")  # optional
 
         if not session_id or not download_command:
-            return jsonify({"success": False, "error": "Session ID and download command are required"}), 400
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Session ID and download command are required",
+                }
+            ), 400
 
         # Perform download
         result = download_from_result(session_id, download_command, filename)

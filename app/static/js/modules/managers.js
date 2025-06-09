@@ -7,11 +7,50 @@ import { showToast } from './utils.js';
 
 /**
  * IRC Search Manager
- * Handles IRC search operations and status tracking
+ * Handles IRC session-based search operations and status tracking
  */
 export class IRCSearchManager {
     constructor() {
         this.activeSearches = new Map();
+        this.sessions = new Map();
+    }
+    
+    /**
+     * Create a new IRC session
+     */
+    async createSession() {
+        try {
+            const response = await apiRequest('/api/irc/sessions', {
+                method: 'POST'
+            });
+            
+            if (response.success) {
+                this.sessions.set(response.session_id, {
+                    created: Date.now(),
+                    status: 'active'
+                });
+                return response.session_id;
+            } else {
+                throw new Error(response.error || 'Failed to create IRC session');
+            }
+        } catch (error) {
+            showToast('Failed to create IRC session', 'danger');
+            throw error;
+        }
+    }
+    
+    /**
+     * Get or create a session for searches
+     */
+    async getOrCreateSession() {
+        // Use existing session if available
+        const activeSessions = Array.from(this.sessions.keys());
+        if (activeSessions.length > 0) {
+            return activeSessions[0];
+        }
+        
+        // Create new session
+        return await this.createSession();
     }
     
     async startSearch(author) {
@@ -21,12 +60,20 @@ export class IRCSearchManager {
         }
         
         try {
-            const response = await apiRequest('/api/search_author_irc', {
+            const sessionId = await this.getOrCreateSession();
+            const response = await apiRequest('/api/irc/search', {
                 method: 'POST',
-                body: JSON.stringify({ author: author })
+                body: JSON.stringify({ 
+                    session_id: sessionId,
+                    author: author 
+                })
             });
             
-            this.activeSearches.set(author, { status: 'searching', startTime: Date.now() });
+            this.activeSearches.set(author, { 
+                status: 'searching', 
+                startTime: Date.now(),
+                sessionId: sessionId
+            });
             showToast(`IRC search started for ${author}`, 'info');
             
             return response;
@@ -36,15 +83,32 @@ export class IRCSearchManager {
         }
     }
     
-    async getSearchStatus(author) {
+    async getSessionStatus(sessionId) {
         try {
-            const status = await apiRequest(`/api/search_status/${encodeURIComponent(author)}`);
+            const response = await apiRequest(`/api/irc/sessions/${sessionId}`);
+            return response;
+        } catch (error) {
+            console.error('Failed to get session status:', error);
+            throw error;
+        }
+    }
+    
+    async getSearchStatus(author) {
+        const searchInfo = this.activeSearches.get(author);
+        if (!searchInfo) {
+            return { status: 'not_found' };
+        }
+        
+        try {
+            const sessionStatus = await this.getSessionStatus(searchInfo.sessionId);
             
-            if (status.status === 'completed' || status.status === 'error') {
+            // Clean up completed searches
+            if (sessionStatus.status && 
+                (sessionStatus.status.status === 'completed' || sessionStatus.status.status === 'error')) {
                 this.activeSearches.delete(author);
             }
             
-            return status;
+            return sessionStatus;
         } catch (error) {
             this.activeSearches.delete(author);
             throw error;
@@ -71,15 +135,92 @@ export class IRCSearchManager {
      */
     async searchSingleBook(author, title) {
         try {
-            const response = await apiRequest('/api/search_single_book_irc', {
+            const sessionId = await this.getOrCreateSession();
+            const response = await apiRequest('/api/irc/search', {
                 method: 'POST',
-                body: JSON.stringify({ author: author, title: title })
+                body: JSON.stringify({ 
+                    session_id: sessionId,
+                    author: author,
+                    title: title
+                })
+            });
+            
+            const searchKey = `${author} - ${title}`;
+            this.activeSearches.set(searchKey, { 
+                status: 'searching', 
+                startTime: Date.now(),
+                sessionId: sessionId
             });
             
             showToast(`IRC search started for "${title}" by ${author}`, 'info');
             return response;
         } catch (error) {
             showToast(`Failed to start search for "${title}" by ${author}`, 'danger');
+            throw error;
+        }
+    }
+    
+    /**
+     * Download a file from IRC search results
+     */
+    async downloadFile(sessionId, downloadCommand, filename) {
+        try {
+            const response = await apiRequest('/api/irc/download', {
+                method: 'POST',
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    download_command: downloadCommand,
+                    filename: filename
+                })
+            });
+            
+            if (response.success) {
+                showToast(`Download started for ${filename || 'file'}`, 'success');
+            } else {
+                showToast(`Download failed: ${response.error}`, 'danger');
+            }
+            
+            return response;
+        } catch (error) {
+            showToast('Failed to start download', 'danger');
+            throw error;
+        }
+    }
+    
+    /**
+     * Close an IRC session
+     */
+    async closeSession(sessionId) {
+        try {
+            const response = await apiRequest(`/api/irc/sessions/${sessionId}/close`, {
+                method: 'POST'
+            });
+            
+            this.sessions.delete(sessionId);
+            
+            // Clean up active searches for this session
+            for (const [key, value] of this.activeSearches.entries()) {
+                if (value.sessionId === sessionId) {
+                    this.activeSearches.delete(key);
+                }
+            }
+            
+            return response;
+        } catch (error) {
+            console.error('Failed to close session:', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * Get list of active sessions
+     */
+    async getActiveSessions() {
+        try {
+            const response = await apiRequest('/api/irc/sessions/active');
+            return response;
+        } catch (error) {
+            console.error('Failed to get active sessions:', error);
             throw error;
         }
     }
