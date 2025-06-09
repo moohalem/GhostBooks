@@ -2,6 +2,7 @@
 
 body {
     background-color: #f8f9fa;
+    color: #212529;
 }
 
 .navbar-brand {
@@ -11,15 +12,19 @@ body {
 .card {
     box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
     border: 1px solid rgba(0, 0, 0, 0.125);
+    background-color: #fff;
 }
 
 .card-header {
     border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+    background-color: #f8f9fa;
+    color: #212529;
 }
 
 .table th {
     border-top: none;
     font-weight: 600;
+    color: #212529;
 }
 
 .btn-group-sm > .btn {
@@ -29,6 +34,7 @@ body {
 
 .badge {
     font-size: 0.75em;
+    font-weight: 600;
 }
 
 /* Author table styling */
@@ -36,10 +42,24 @@ body {
     background-color: rgba(0, 0, 0, 0.075);
 }
 
+/* Enhanced text contrast */
+.text-muted {
+    color: #6c757d !important;
+}
+
+.text-secondary {
+    color: #495057 !important;
+}
+
 /* Loading spinner animation */
 .spinner-border {
     width: 3rem;
     height: 3rem;
+    border-width: 0.3em;
+}
+
+.spinner-border-sm {
+    border-width: 0.2em;
 }
 
 /* Search input styling */
@@ -57,18 +77,35 @@ body {
     color: #dc3545 !important;
 }
 
-/* Status badges */
+/* Status badges with improved contrast */
 .badge.bg-success {
     background-color: #198754 !important;
+    color: #fff !important;
 }
 
 .badge.bg-danger {
     background-color: #dc3545 !important;
+    color: #fff !important;
 }
 
 .badge.bg-warning {
-    background-color: #ffc107 !important;
+    background-color: #fd7e14 !important;
+    color: #fff !important;
+}
+
+.badge.bg-primary {
+    background-color: #0d6efd !important;
+    color: #fff !important;
+}
+
+.badge.bg-info {
+    background-color: #0dcaf0 !important;
     color: #000 !important;
+}
+
+.badge.bg-secondary {
+    background-color: #6c757d !important;
+    color: #fff !important;
 }
 
 /* Card hover effects */
@@ -80,11 +117,14 @@ body {
 /* Progress bar styling */
 .progress {
     height: 1.5rem;
+    background-color: #e9ecef;
 }
 
 .progress-bar {
     font-size: 0.875rem;
     line-height: 1.5rem;
+    color: #fff;
+    font-weight: 600;
 }
 
 /* Footer styling */
@@ -107,10 +147,11 @@ footer {
     }
 }
 
-/* Alert styling */
+/* Alert styling with enhanced contrast */
 .alert {
     border: none;
     border-radius: 0.5rem;
+    color: #212529;
 }
 
 .alert-info {
@@ -122,7 +163,7 @@ footer {
 .alert-success {
     background-color: #d1e7dd;
     border-color: #badbcc;
-    color: #0f5132;
+    color: #0a3622;
 }
 
 .alert-warning {
@@ -134,7 +175,7 @@ footer {
 .alert-danger {
     background-color: #f8d7da;
     border-color: #f5c2c7;
-    color: #842029;
+    color: #721c24;
 }
 
 /* Modal styling */
@@ -146,19 +187,105 @@ footer {
     border-top: 1px solid #dee2e6;
 }
 
-/* List group styling */
+/* Enhanced text contrast and readability */
+.card-body {
+    color: #212529;
+}
+
+.card-title {
+    color: #212529;
+    font-weight: 600;
+}
+
+.table {
+    color: #212529;
+}
+
+.table tbody td {
+    color: #212529;
+}
+
+/* Improved small text readability */
+small, .small {
+    color: #495057;
+}
+
+/* List group items with better contrast */
 .list-group-item {
     border: 1px solid rgba(0, 0, 0, 0.125);
+    color: #212529;
 }
 
-.list-group-item:first-child {
-    border-top-left-radius: 0.375rem;
-    border-top-right-radius: 0.375rem;
+.list-group-item-action:hover {
+    background-color: #f8f9fa;
+    color: #212529;
 }
 
-.list-group-item:last-child {
-    border-bottom-right-radius: 0.375rem;
-    border-bottom-left-radius: 0.375rem;
+/* Enhanced button contrast */
+.btn-outline-primary {
+    color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.btn-outline-primary:hover {
+    color: #fff;
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.btn-outline-secondary {
+    color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-outline-secondary:hover {
+    color: #fff;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-outline-success {
+    color: #198754;
+    border-color: #198754;
+}
+
+.btn-outline-success:hover {
+    color: #fff;
+    background-color: #198754;
+    border-color: #198754;
+}
+
+.btn-outline-warning {
+    color: #fd7e14;
+    border-color: #fd7e14;
+}
+
+.btn-outline-warning:hover {
+    color: #fff;
+    background-color: #fd7e14;
+    border-color: #fd7e14;
+}
+
+.btn-outline-danger {
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
+.btn-outline-danger:hover {
+    color: #fff;
+    background-color: #dc3545;
+    border-color: #dc3545;
+}
+
+.btn-outline-info {
+    color: #0dcaf0;
+    border-color: #0dcaf0;
+}
+
+.btn-outline-info:hover {
+    color: #000;
+    background-color: #0dcaf0;
+    border-color: #0dcaf0;
 }
 
 /* Button animations */
@@ -313,6 +440,7 @@ input[type="text"]:focus {
 .search-info {
     font-size: 0.875rem;
     font-style: italic;
+    color: #495057;
 }
 
 /* Table info styling */
@@ -321,44 +449,166 @@ input[type="text"]:focus {
     margin-top: 0.5rem;
     font-size: 0.875rem;
     font-style: italic;
+    color: #495057;
 }
 
-/* Responsive improvements */
-@media (max-width: 576px) {
-    .navbar-nav {
-        text-align: center;
-    }
-    
-    .btn-group-vertical .btn {
-        margin-bottom: 0.25rem;
-    }
-    
-    .table-responsive {
-        font-size: 0.8rem;
-    }
-    
-    .card-header h5 {
-        font-size: 1rem;
-    }
+/* Enhanced form control contrast */
+.form-control {
+    color: #212529;
+    background-color: #fff;
+    border: 1px solid #ced4da;
 }
 
-/* Dark mode support (optional) */
+.form-control:focus {
+    color: #212529;
+    background-color: #fff;
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Improved navigation contrast */
+.navbar-dark .navbar-nav .nav-link {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    color: #fff;
+}
+
+/* Enhanced accordion styling */
+.accordion-button {
+    color: #212529;
+    background-color: #fff;
+}
+
+.accordion-button:not(.collapsed) {
+    color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+.accordion-button:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Improved modal contrast */
+.modal-content {
+    background-color: #fff;
+    color: #212529;
+}
+
+.modal-header {
+    border-bottom: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+    color: #212529;
+}
+
+.modal-footer {
+    border-top: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+}
+
+/* Additional contrast improvements for UI components */
+
+/* Breadcrumb styling */
+.breadcrumb {
+    background-color: #e9ecef;
+}
+
+.breadcrumb-item a {
+    color: #0d6efd;
+    text-decoration: none;
+}
+
+.breadcrumb-item a:hover {
+    color: #0a58ca;
+    text-decoration: underline;
+}
+
+.breadcrumb-item.active {
+    color: #6c757d;
+}
+
+/* Improved status indicators */
+.text-success {
+    color: #198754 !important;
+}
+
+.text-danger {
+    color: #dc3545 !important;
+}
+
+.text-warning {
+    color: #fd7e14 !important;
+}
+
+.text-info {
+    color: #0dcaf0 !important;
+}
+
+/* Tooltip improvements */
+.tooltip {
+    font-size: 0.875rem;
+}
+
+.tooltip-inner {
+    background-color: #212529;
+    color: #fff;
+    border: 1px solid #495057;
+}
+
+/* Dropdown menu contrast */
+.dropdown-menu {
+    background-color: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    color: #212529;
+}
+
+.dropdown-item {
+    color: #212529;
+}
+
+.dropdown-item:hover {
+    background-color: #f8f9fa;
+    color: #212529;
+}
+
+/* Dark mode for additional elements */
 @media (prefers-color-scheme: dark) {
-    body {
-        background-color: #121212;
-        color: #e0e0e0;
+    .breadcrumb {
+        background-color: #2a2a2a;
     }
     
-    .card {
+    .breadcrumb-item a {
+        color: #86b7fe;
+    }
+    
+    .breadcrumb-item a:hover {
+        color: #6ea8fe;
+    }
+    
+    .breadcrumb-item.active {
+        color: #adb5bd;
+    }
+    
+    .dropdown-menu {
         background-color: #1e1e1e;
         border-color: #333;
-    }
-    
-    .table {
         color: #e0e0e0;
     }
     
-    .table-striped > tbody > tr:nth-of-type(odd) > td {
-        background-color: rgba(255, 255, 255, 0.05);
+    .dropdown-item {
+        color: #e0e0e0;
+    }
+    
+    .dropdown-item:hover {
+        background-color: #2a2a2a;
+        color: #e0e0e0;
+    }
+    
+    .tooltip-inner {
+        background-color: #333;
+        color: #e0e0e0;
+        border-color: #495057;
     }
 }

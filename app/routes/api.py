@@ -11,11 +11,13 @@ from flask import Blueprint, current_app, jsonify, request
 from app.services.database import (
     find_calibre_metadata_db,
     get_author_books,
-    get_authors,
+    get_database_connection,
     get_database_stats,
     get_metadata_db_info,
     get_missing_books,
+    get_recently_processed_authors,
     search_authors,
+    update_author_processing_time,
     update_missing_books,
     verify_calibre_database,
 )
@@ -29,21 +31,69 @@ api_bp = Blueprint("api", __name__)
 def get_all_authors():
     """API endpoint to get all authors with stats."""
     try:
-        authors = get_authors(current_app.config["DB_PATH"])
-        authors_with_stats = []
+        # Get pagination parameters
+        page = int(request.args.get("page", 1))
+        per_page = int(
+            request.args.get("per_page", 100)
+        )  # Default to 100 authors per page
+        search = request.args.get("search", "").strip()
 
-        for author in authors:
-            books = get_author_books(current_app.config["DB_PATH"], author)
-            missing_count = sum(1 for book in books if book["missing"])
+        # Get authors from database with optional search filter
+        db_path = current_app.config["DB_PATH"]
+        conn = get_database_connection(db_path)
+        cursor = conn.cursor()
+
+        # Build query with search filter
+        base_query = """
+            SELECT DISTINCT author, 
+                   COUNT(*) as total_books,
+                   SUM(CASE WHEN missing = 1 THEN 1 ELSE 0 END) as missing_books
+            FROM author_book 
+        """
+
+        if search:
+            base_query += "WHERE author LIKE ? "
+            params = (f"%{search}%",)
+        else:
+            params = ()
+
+        base_query += "GROUP BY author ORDER BY author "
+
+        # Get total count for pagination
+        count_query = f"SELECT COUNT(*) FROM ({base_query}) as subquery"
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+
+        # Add pagination
+        offset = (page - 1) * per_page
+        paginated_query = base_query + f"LIMIT {per_page} OFFSET {offset}"
+
+        cursor.execute(paginated_query, params)
+        rows = cursor.fetchall()
+
+        authors_with_stats = []
+        for row in rows:
             authors_with_stats.append(
                 {
-                    "name": author,
-                    "total_books": len(books),
-                    "missing_books": missing_count,
+                    "author": row[0],
+                    "total_books": row[1],
+                    "missing_books": row[2] or 0,
                 }
             )
 
-        return jsonify(authors_with_stats)
+        conn.close()
+
+        return jsonify(
+            {
+                "authors": authors_with_stats,
+                "pagination": {
+                    "page": page,
+                    "per_page": per_page,
+                    "total": total_count,
+                    "pages": (total_count + per_page - 1) // per_page,
+                },
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -141,8 +191,102 @@ def compare_author(author_name):
             update_missing_books(
                 current_app.config["DB_PATH"], author_name, result["missing_books"]
             )
+            # Record that this author was processed
+            update_author_processing_time(current_app.config["DB_PATH"], author_name)
 
-        return jsonify(result)
+            # Create enhanced book data with status information
+            missing_titles_set = {
+                title.lower().strip() for title in result["missing_books"]
+            }
+            enhanced_books = []
+
+            for book in local_books:
+                book_title_lower = book["title"].lower().strip()
+                if book_title_lower in missing_titles_set:
+                    # This book is missing from local library but exists in OpenLibrary
+                    status = "missing_local"
+                    status_info = "Missing from local library"
+                elif book["missing"]:
+                    # This book was already marked as missing
+                    status = "missing_local"
+                    status_info = "Missing from local library"
+                else:
+                    # This book exists in both local and OpenLibrary
+                    status = "exists_both"
+                    status_info = "Available in library"
+
+                enhanced_books.append(
+                    {
+                        "id": book.get("id"),
+                        "title": book["title"],
+                        "missing": book["missing"],
+                        "status": status,
+                        "status_info": status_info,
+                    }
+                )
+
+            # Add missing books that are in OpenLibrary but not in local library
+            for missing_title in result["missing_books"]:
+                # Check if this book is already in our local books list
+                if not any(
+                    book["title"].lower().strip() == missing_title.lower().strip()
+                    for book in local_books
+                ):
+                    enhanced_books.append(
+                        {
+                            "id": None,
+                            "title": missing_title,
+                            "missing": True,
+                            "status": "missing_local",
+                            "status_info": "Missing from local library",
+                        }
+                    )
+
+            return jsonify(
+                {
+                    "success": True,
+                    "author": author_name,
+                    "books": enhanced_books,
+                    "local_count": result["local_count"],
+                    "openlibrary_count": result["openlibrary_count"],
+                    "missing_count": result["missing_count"],
+                    "missing_books": result["missing_books"],
+                }
+            )
+        else:
+            # If comparison failed, still return local books with basic status
+            enhanced_books = []
+            for book in local_books:
+                status = "missing_api" if book["missing"] else "exists_both"
+                status_info = (
+                    "Could not verify with OpenLibrary"
+                    if book["missing"]
+                    else "Available in library"
+                )
+
+                enhanced_books.append(
+                    {
+                        "id": book.get("id"),
+                        "title": book["title"],
+                        "missing": book["missing"],
+                        "status": status,
+                        "status_info": status_info,
+                    }
+                )
+
+            return jsonify(
+                {
+                    "success": False,
+                    "author": author_name,
+                    "books": enhanced_books,
+                    "message": result.get("message", "Comparison failed"),
+                    "local_count": len(local_books),
+                    "openlibrary_count": 0,
+                    "missing_count": len([b for b in local_books if b["missing"]]),
+                    "missing_books": [],
+                }
+            )
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -336,5 +480,22 @@ def get_current_metadata_info():
                 "info": db_info,
             }
         )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/recently_processed_authors")
+def get_recently_processed_authors_endpoint():
+    """API endpoint for recently processed authors."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+        # Check if database file exists and has data
+        exists = os.path.exists(db_path) and os.path.getsize(db_path) > 0
+
+        if exists:
+            authors = get_recently_processed_authors(db_path, limit=10)
+            return jsonify(authors)
+        else:
+            return jsonify([])
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -346,3 +346,83 @@ def search_authors(db_path: str, query: str) -> List[str]:
     authors = [row[0] for row in cursor.fetchall()]
     conn.close()
     return authors
+
+
+def ensure_author_processing_table(db_path: str) -> None:
+    """Ensure the author_processing table exists for tracking processing times."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS author_processing (
+            author TEXT PRIMARY KEY,
+            last_processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            processed_count INTEGER DEFAULT 0
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def update_author_processing_time(db_path: str, author: str) -> None:
+    """Update the processing timestamp for an author."""
+    ensure_author_processing_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO author_processing (author, last_processed_at, processed_count)
+        VALUES (?, CURRENT_TIMESTAMP, 
+                COALESCE((SELECT processed_count FROM author_processing WHERE author = ?), 0) + 1)
+    """,
+        (author, author),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_recently_processed_authors(
+    db_path: str, limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Get recently processed authors with their stats."""
+    ensure_author_processing_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    # Get recently processed authors with their book stats
+    cursor.execute(
+        """
+        SELECT 
+            ap.author,
+            ap.last_processed_at,
+            ap.processed_count,
+            COUNT(ab.id) as total_books,
+            SUM(CASE WHEN ab.missing = 1 THEN 1 ELSE 0 END) as missing_books
+        FROM author_processing ap
+        LEFT JOIN author_book ab ON ap.author = ab.author
+        GROUP BY ap.author, ap.last_processed_at, ap.processed_count
+        ORDER BY ap.last_processed_at DESC
+        LIMIT ?
+    """,
+        (limit,),
+    )
+
+    authors = []
+    for row in cursor.fetchall():
+        authors.append(
+            {
+                "name": row[0],
+                "last_processed_at": row[1],
+                "processed_count": row[2],
+                "total_books": row[3] or 0,
+                "missing_books": row[4] or 0,
+            }
+        )
+
+    conn.close()
+    return authors

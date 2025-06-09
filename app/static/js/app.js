@@ -108,7 +108,17 @@ function initializeTableSearch(searchInputId, tableId, searchColumnIndex = 0) {
 }
 
 function updateTableInfo(tableId, visibleCount, totalCount) {
-    const tableContainer = document.getElementById(tableId).closest('.card');
+    const tableElement = document.getElementById(tableId);
+    if (!tableElement) {
+        // No table found - probably using accordion interface
+        return;
+    }
+    
+    const tableContainer = tableElement.closest('.card');
+    if (!tableContainer) {
+        return;
+    }
+    
     let infoElement = tableContainer.querySelector('.table-info');
     
     if (!infoElement) {
@@ -298,9 +308,10 @@ async function showDashboard() {
     
     try {
         // Load dashboard stats and database info
-        const [stats, authors] = await Promise.all([
+        // Load both stats and recently processed authors
+        const [stats, recentlyProcessedAuthors] = await Promise.all([
             apiRequest('/api/stats'),
-            apiRequest('/api/authors')
+            apiRequest('/api/recently_processed_authors')
         ]);
         
         // Load database info
@@ -309,8 +320,8 @@ async function showDashboard() {
         // Update stats cards
         updateDashboardStats(stats);
         
-        // Update recent authors - handle empty case
-        const recentAuthors = Array.isArray(authors) ? authors.slice(0, 10) : [];
+        // Update recently processed authors - handle empty case
+        const recentAuthors = Array.isArray(recentlyProcessedAuthors) ? recentlyProcessedAuthors.slice(0, 10) : [];
         updateRecentAuthors(recentAuthors);
         
         document.getElementById('dashboard-view').style.display = 'block';
@@ -323,7 +334,7 @@ async function showDashboard() {
         
     } catch (error) {
         showToast('Failed to load dashboard data', 'danger');
-        // Show empty state for recent authors on error
+        // Show empty state for recently processed authors on error
         updateRecentAuthors([]);
     } finally {
         showLoading(false);
@@ -408,57 +419,190 @@ async function showAuthorDetail(authorName) {
     }
 }
 
-// Data loading functions
-async function loadAuthors() {
-    const authors = await apiRequest('/api/authors');
-    const accordion = document.getElementById('authors-accordion');
+// Pagination controls
+function updatePaginationControls(pagination, search = '') {
+    const paginationContainer = document.getElementById('authors-pagination');
+    if (!paginationContainer) {
+        return;
+    }
     
-    accordion.innerHTML = authors.map((author, index) => `
-        <div class="accordion-item border-0 border-bottom">
-            <h2 class="accordion-header" id="heading${index}">
-                <button class="accordion-button collapsed d-flex justify-content-between align-items-center" 
-                        type="button" 
-                        data-bs-toggle="collapse" 
-                        data-bs-target="#collapse${index}" 
-                        onclick="selectAuthorFromAccordion('${escapeHtml(author.author)}')"
-                        style="background: none; border: none;">
-                    <div class="d-flex align-items-center flex-grow-1">
-                        <i class="fas fa-user me-2"></i>
-                        <strong>${escapeHtml(author.author)}</strong>
-                    </div>
-                    <div class="d-flex align-items-center">
-                        <span class="badge bg-primary me-2">${author.total_books} books</span>
-                        ${author.missing_books > 0 ? 
-                            `<span class="badge bg-warning me-2">${author.missing_books} missing</span>` : 
-                            `<span class="badge bg-success me-2">Complete</span>`
-                        }
-                    </div>
-                </button>
-            </h2>
-            <div id="collapse${index}" 
-                 class="accordion-collapse collapse" 
-                 data-bs-parent="#authors-accordion"
-                 data-author="${escapeHtml(author.author)}">
-                <div class="accordion-body p-0">
-                    <div class="loading-books text-center p-3">
-                        <div class="spinner-border spinner-border-sm" role="status">
-                            <span class="visually-hidden">Loading books...</span>
+    const paginationList = paginationContainer.querySelector('.pagination');
+    if (!paginationList) {
+        return;
+    }
+    
+    if (!pagination || !pagination.pages || pagination.pages <= 1) {
+        paginationContainer.style.display = 'none';
+        return;
+    }
+    
+    paginationContainer.style.display = 'block';
+    
+    const currentPage = pagination.page || 1;
+    const totalPages = pagination.pages || 1;
+    
+    let paginationHTML = '';
+    
+    // Previous button
+    paginationHTML += `
+        <li class="page-item ${currentPage <= 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuthors(${currentPage - 1}, '${search}'); return false;">
+                <i class="fas fa-chevron-left"></i>
+            </a>
+        </li>
+    `;
+    
+    // Page numbers
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    
+    // Adjust start if we're near the end
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    
+    // First page and ellipsis
+    if (startPage > 1) {
+        paginationHTML += `
+            <li class="page-item">
+                <a class="page-link" href="#" onclick="loadAuthors(1, '${search}'); return false;">1</a>
+            </li>
+        `;
+        if (startPage > 2) {
+            paginationHTML += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+    }
+    
+    // Page numbers
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHTML += `
+            <li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" onclick="loadAuthors(${i}, '${search}'); return false;">${i}</a>
+            </li>
+        `;
+    }
+    
+    // Last page and ellipsis
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHTML += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+        }
+        paginationHTML += `
+            <li class="page-item">
+                <a class="page-link" href="#" onclick="loadAuthors(${totalPages}, '${search}'); return false;">${totalPages}</a>
+            </li>
+        `;
+    }
+    
+    // Next button
+    paginationHTML += `
+        <li class="page-item ${currentPage >= totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadAuthors(${currentPage + 1}, '${search}'); return false;">
+                <i class="fas fa-chevron-right"></i>
+            </a>
+        </li>
+    `;
+    
+    paginationList.innerHTML = paginationHTML;
+    
+    // Update search results info
+    const searchInfo = document.getElementById('search-results-info');
+    if (search) {
+        searchInfo.style.display = 'block';
+        searchInfo.textContent = `Found ${pagination.total} authors matching "${search}" (Page ${currentPage} of ${totalPages})`;
+    } else {
+        searchInfo.style.display = 'none';
+    }
+}
+
+// Data loading functions
+async function loadAuthors(page = 1, search = '') {
+    try {
+        const params = new URLSearchParams({ 
+            page: page, 
+            per_page: 50  // Reduced from 100 for better performance
+        });
+        if (search) {
+            params.append('search', search);
+        }
+        
+        const response = await apiRequest(`/api/authors?${params}`);
+        const authors = response.authors || [];
+        const pagination = response.pagination || {};
+        
+        const accordion = document.getElementById('authors-accordion');
+        
+        if (authors.length === 0) {
+            accordion.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="fas fa-info-circle text-muted"></i>
+                    <p class="text-muted mt-2">No authors found</p>
+                </div>
+            `;
+            return;
+        }
+        
+        accordion.innerHTML = authors.map((author, index) => `
+            <div class="accordion-item border-0 border-bottom">
+                <h2 class="accordion-header" id="heading${(page-1)*50 + index}">
+                    <button class="accordion-button collapsed d-flex justify-content-between align-items-center" 
+                            type="button" 
+                            data-bs-toggle="collapse" 
+                            data-bs-target="#collapse${(page-1)*50 + index}" 
+                            onclick="selectAuthorFromAccordion('${escapeHtml(author.author)}')"
+                            style="background: none; border: none;">
+                        <div class="d-flex align-items-center flex-grow-1">
+                            <i class="fas fa-user me-2"></i>
+                            <strong>${escapeHtml(author.author)}</strong>
                         </div>
-                        <small class="text-muted ms-2">Loading books...</small>
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-primary me-2">${author.total_books} books</span>
+                            ${author.missing_books > 0 ? 
+                                `<span class="badge bg-warning me-2">${author.missing_books} missing</span>` : 
+                                `<span class="badge bg-success me-2">Complete</span>`
+                            }
+                        </div>
+                    </button>
+                </h2>
+                <div id="collapse${(page-1)*50 + index}" 
+                     class="accordion-collapse collapse" 
+                     data-bs-parent="#authors-accordion"
+                     data-author="${escapeHtml(author.author)}">
+                    <div class="accordion-body p-0">
+                        <div class="loading-books text-center p-3">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">Loading books...</span>
+                            </div>
+                            <small class="text-muted ms-2">Loading books...</small>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    `).join('');
-    
-    // Add event listeners for accordion expansion
-    accordion.addEventListener('shown.bs.collapse', async function(e) {
-        const authorName = e.target.getAttribute('data-author');
-        await loadAuthorBooks(e.target, authorName);
-    });
-    
-    // Update table info
-    updateTableInfo('authors-table', authors.length, authors.length);
+        `).join('');
+        
+        // Add pagination controls
+        updatePaginationControls(pagination, search);
+        
+        // Add event listeners for accordion expansion
+        accordion.addEventListener('shown.bs.collapse', async function(e) {
+            const authorName = e.target.getAttribute('data-author');
+            await loadAuthorBooks(e.target, authorName);
+        });
+        
+        // Update table info
+        updateTableInfo('authors-table', authors.length, pagination.total);
+        
+    } catch (error) {
+        console.error('Error loading authors:', error);
+        const accordion = document.getElementById('authors-accordion');
+        accordion.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle"></i>
+                Error loading authors: ${error.message}
+            </div>
+        `;
+    }
 }
 
 async function loadMissingBooks() {
@@ -478,7 +622,7 @@ async function loadMissingBooks() {
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
-                    <a href="#" onclick="showAuthorDetail('${escapeHtml(author)}')" 
+                    <a href="#" onclick="showAuthorDetail(${JSON.stringify(author)})" 
                        class="text-decoration-none">
                         ${escapeHtml(author)}
                     </a>
@@ -486,7 +630,7 @@ async function loadMissingBooks() {
                 </h5>
                 <div>
                     <button class="btn btn-sm btn-outline-success" 
-                            onclick="refreshAuthor('${escapeHtml(author)}')">
+                            onclick="refreshAuthor(${JSON.stringify(author)})">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                     <button class="btn btn-sm btn-outline-info" 
@@ -520,7 +664,7 @@ function updateDashboardStats(stats) {
 }
 
 function updateRecentAuthors(authors) {
-    const recentAuthorsEl = document.getElementById('recent-authors-list');
+    const recentAuthorsEl = document.getElementById('recently-processed-authors-list');
     if (!recentAuthorsEl) return;
     
     // Check if there are no authors
@@ -528,7 +672,7 @@ function updateRecentAuthors(authors) {
         recentAuthorsEl.innerHTML = `
             <tr>
                 <td colspan="3" class="text-center text-muted py-3">
-                    <i class="fas fa-info-circle"></i> No authors found in database
+                    <i class="fas fa-info-circle"></i> No recently processed authors found
                 </td>
             </tr>
         `;
@@ -538,7 +682,7 @@ function updateRecentAuthors(authors) {
     recentAuthorsEl.innerHTML = authors.map(author => `
         <tr>
             <td>
-                <a href="#" onclick="showAuthorDetail('${escapeHtml(author.name)}')" 
+                <a href="#" onclick="showAuthorDetail(${JSON.stringify(author.name)})" 
                    class="text-decoration-none">
                     ${escapeHtml(author.name)}
                 </a>
@@ -746,59 +890,15 @@ async function refreshAuthor(author) {
 }
 
 // Search and filter functions
+let searchTimeout;
 function filterAuthors() {
-    const searchTerm = document.getElementById('author-search').value.toLowerCase();
-    const searchResultsInfo = document.getElementById('search-results-info');
+    const searchTerm = document.getElementById('author-search').value;
     
-    // Check if we're using the accordion interface (new) or table interface (old)
-    const accordion = document.getElementById('authors-accordion');
-    const table = document.getElementById('authors-table-body');
-    
-    if (accordion) {
-        // New accordion interface
-        const items = accordion.querySelectorAll('.accordion-item');
-        let visibleCount = 0;
-        
-        items.forEach(item => {
-            const authorButton = item.querySelector('.accordion-button');
-            const authorName = authorButton.textContent.toLowerCase();
-            
-            if (authorName.includes(searchTerm)) {
-                item.style.display = 'block';
-                visibleCount++;
-            } else {
-                item.style.display = 'none';
-            }
-        });
-        
-        // Update search results info
-        if (searchResultsInfo) {
-            if (searchTerm.trim() === '') {
-                searchResultsInfo.style.display = 'none';
-            } else {
-                searchResultsInfo.style.display = 'block';
-                if (visibleCount === 0) {
-                    searchResultsInfo.innerHTML = `<span class="text-warning">No authors found matching "${escapeHtml(searchTerm)}"</span>`;
-                } else {
-                    searchResultsInfo.innerHTML = `Showing ${visibleCount} of ${items.length} authors`;
-                }
-            }
-        }
-        
-    } else if (table) {
-        // Old table interface (fallback)
-        const rows = table.querySelectorAll('tr');
-        let visibleCount = 0;
-        
-        rows.forEach(row => {
-            const authorName = row.querySelector('td').textContent.toLowerCase();
-            const visible = authorName.includes(searchTerm);
-            row.style.display = visible ? '' : 'none';
-            if (visible) visibleCount++;
-        });
-        
-        updateTableInfo('authors-table', visibleCount, rows.length);
-    }
+    // Debounce search to avoid too many API calls
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        loadAuthors(1, searchTerm);
+    }, 300);
 }
 
 function setupAccordionSearch() {
@@ -1113,7 +1213,7 @@ async function processSpecificAuthor() {
 }
 
 // Author autocomplete functionality
-let searchTimeout;
+let authorSearchTimeout;
 let currentSuggestions = [];
 
 function setupAuthorAutocomplete() {
@@ -1127,8 +1227,8 @@ function setupAuthorAutocomplete() {
         const query = e.target.value.trim();
         
         // Clear previous timeout
-        if (searchTimeout) {
-            clearTimeout(searchTimeout);
+        if (authorSearchTimeout) {
+            clearTimeout(authorSearchTimeout);
         }
         
         if (query.length < 2) {
@@ -1137,7 +1237,7 @@ function setupAuthorAutocomplete() {
         }
         
         // Debounce search
-        searchTimeout = setTimeout(() => {
+        authorSearchTimeout = setTimeout(() => {
             searchAuthors(query);
         }, 300);
     });
@@ -1287,6 +1387,11 @@ async function loadAuthorBooks(accordionBody, authorName) {
         // Use the enhanced comparison API endpoint
         const authorData = await apiRequest(`/api/author/${encodeURIComponent(authorName)}/compare`);
         
+        // Validate API response
+        if (!authorData || !authorData.books || !Array.isArray(authorData.books)) {
+            throw new Error('Invalid API response: missing books array');
+        }
+        
         // Create books list with enhanced status indicators
         const localBooksHtml = authorData.books.map(book => {
             let statusIcon, statusClass, statusText;
@@ -1295,27 +1400,27 @@ async function loadAuthorBooks(accordionBody, authorName) {
                 case 'exists_both':
                     statusIcon = 'fas fa-check-circle';
                     statusClass = 'text-success';
-                    statusText = book.status_info;
+                    statusText = book.status_info || 'Available in library';
                     break;
                 case 'missing_local':
                     statusIcon = 'fas fa-exclamation-triangle';
                     statusClass = 'text-danger';
-                    statusText = book.status_info;
+                    statusText = book.status_info || 'Missing from local library';
                     break;
                 case 'missing_api':
                     statusIcon = 'fas fa-question-circle';
                     statusClass = 'text-warning';
-                    statusText = book.status_info;
+                    statusText = book.status_info || 'Could not verify with API';
                     break;
                 case 'missing_both':
                     statusIcon = 'fas fa-times-circle';
                     statusClass = 'text-muted';
-                    statusText = book.status_info;
+                    statusText = book.status_info || 'Missing from both sources';
                     break;
                 default:
                     statusIcon = 'fas fa-circle';
                     statusClass = 'text-secondary';
-                    statusText = 'Status unknown';
+                    statusText = book.status_info || 'Status unknown';
             }
             
             return `
@@ -1332,50 +1437,31 @@ async function loadAuthorBooks(accordionBody, authorName) {
             `;
         }).join('');
         
-        // Add API-only books (books found in OpenLibrary but not in local library)
-        const apiOnlyBooksHtml = authorData.api_only_books.map(book => `
-            <div class="border-bottom py-2 px-3 d-flex justify-content-between align-items-center bg-light">
-                <div class="flex-grow-1">
-                    <span class="text-danger fst-italic">${escapeHtml(book.title)}</span>
-                    <small class="text-muted d-block">Found in OpenLibrary only</small>
-                </div>
-                <div class="ms-2">
-                    <i class="fas fa-exclamation-triangle text-danger" 
-                       title="${book.status_info}"
-                       data-bs-toggle="tooltip"></i>
-                </div>
-            </div>
-        `).join('');
+        // No need for separate API-only books section since they're now included in the main books array
         
         accordionBody.innerHTML = `
             <div class="author-books-list">
                 ${localBooksHtml}
-                ${apiOnlyBooksHtml ? `
-                    <div class="bg-secondary text-white px-3 py-1">
-                        <small><strong>Additional books found in OpenLibrary:</strong></small>
-                    </div>
-                    ${apiOnlyBooksHtml}
-                ` : ''}
             </div>
             <div class="p-3 bg-light border-top">
                 <div class="row">
                     <div class="col-md-6">
                         <small class="text-muted">
-                            <strong>Local Library:</strong> ${authorData.total_local_books} books<br>
-                            <strong>Missing from Local:</strong> ${authorData.missing_from_local} books
+                            <strong>Local Library:</strong> ${authorData.local_count || 0} books<br>
+                            <strong>Missing Books:</strong> ${authorData.missing_count || 0} books
                         </small>
                     </div>
                     <div class="col-md-6">
                         <small class="text-muted">
-                            <strong>OpenLibrary API:</strong> ${authorData.total_api_books} books<br>
-                            <strong>Missing from API:</strong> ${authorData.missing_from_api} books
+                            <strong>OpenLibrary API:</strong> ${authorData.openlibrary_count || 0} books<br>
+                            <strong>Comparison:</strong> ${authorData.success ? 'Available' : 'Failed'}
                         </small>
                     </div>
                 </div>
-                ${!authorData.comparison_available ? `
+                ${!authorData.success ? `
                     <div class="alert alert-warning alert-sm mt-2 mb-0">
                         <i class="fas fa-exclamation-triangle"></i>
-                        <small>Author not found in OpenLibrary - comparison unavailable</small>
+                        <small>${authorData.message || 'Comparison with OpenLibrary failed'}</small>
                     </div>
                 ` : ''}
             </div>

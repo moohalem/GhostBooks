@@ -142,10 +142,10 @@
                 </div>
             </div>
 
-            <!-- Recent Authors -->
+            <!-- Recently Processed Authors -->
             <div class="card">
                 <div class="card-header">
-                    <h5><i class="fas fa-users"></i> Recent Authors</h5>
+                    <h5><i class="fas fa-users"></i> Recently Processed Authors</h5>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -157,7 +157,7 @@
                                     <th>Missing Books</th>
                                 </tr>
                             </thead>
-                            <tbody id="recent-authors-list">
+                            <tbody id="recently-processed-authors-list">
                             </tbody>
                         </table>
                     </div>
@@ -195,6 +195,13 @@
                             <div id="authors-accordion">
                                 <!-- Authors with expandable book lists will be loaded here -->
                             </div>
+                        </div>
+                        <div class="card-footer">
+                            <nav id="authors-pagination" style="display: none;">
+                                <ul class="pagination pagination-sm justify-content-center mb-0">
+                                    <!-- Pagination controls will be inserted here -->
+                                </ul>
+                            </nav>
                         </div>
                     </div>
                 </div>
@@ -275,7 +282,7 @@
                     <button class="btn btn-outline-secondary" onclick="showAuthors()">
                         <i class="fas fa-arrow-left"></i> Back to Authors
                     </button>
-                    <button class="btn btn-outline-primary" onclick="refreshAuthor()">
+                    <button class="btn btn-outline-primary" onclick="refreshAuthor(window.currentAuthor)">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                     <button class="btn btn-warning" onclick="searchAuthorIRC(window.currentAuthor)" id="irc-search-btn">

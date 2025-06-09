@@ -17,12 +17,24 @@ from urllib.parse import quote
 import requests
 from flask import Flask, jsonify, render_template, request
 
-app = Flask(__name__)
+# Import API blueprint
+from app.routes.api import api_bp
+
+# Import database service functions
+from app.services.database import update_author_processing_time
+
+app = Flask(__name__, template_folder="app/templates", static_folder="app/static")
 app.secret_key = "calibre_monitor_secret_key_change_in_production"
 
+# Register API blueprint
+app.register_blueprint(api_bp, url_prefix="/api")
+
 # Database paths
-DB_PATH = "authors_books.db"
+DB_PATH = "data/authors_books.db"
 CALIBRE_DB_PATH = "metadata.db"
+
+# Configure Flask app
+app.config["DB_PATH"] = DB_PATH
 
 # Global variable to track IRC search status
 irc_search_status = {}
@@ -574,6 +586,9 @@ def refresh_author(author):
         # Process author against OpenLibrary using integrated function
         process_author_for_missing_books(author, verbose=False)
 
+        # Record processing timestamp
+        update_author_processing_time(DB_PATH, author)
+
         # Get updated stats
         books = get_books_by_author(author)
         missing_count = len([book for book in books if book["missing"]])
@@ -661,6 +676,8 @@ def api_process_all_authors():
             for author in authors:
                 try:
                     process_author_for_missing_books(author, verbose=False)
+                    # Record processing timestamp
+                    update_author_processing_time(DB_PATH, author)
                     processed += 1
                     print(f"Processed {processed}/{len(authors)}: {author}")
                     # Add delay to avoid rate limiting
@@ -733,6 +750,9 @@ def api_process_specific_author():
 
         # Process the author
         missing_books = process_author_for_missing_books(author_name, verbose=True)
+
+        # Record processing timestamp
+        update_author_processing_time(DB_PATH, author_name)
 
         return jsonify(
             {
@@ -970,5 +990,5 @@ if __name__ == "__main__":
             print(result["message"])
 
     print("Starting Calibre Monitor Web Interface...")
-    print("Access the web interface at: http://localhost:5001")
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    print("Access the web interface at: http://localhost:5002")
+    app.run(debug=True, host="0.0.0.0", port=5002)
