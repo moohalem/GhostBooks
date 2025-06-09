@@ -49,55 +49,53 @@
                 </button>
             </h1>
             
-            <!-- Database Management -->
+            <!-- Missing Books Database Management -->
             <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header">
-                            <h5><i class="fas fa-database"></i> Database Management</h5>
+                            <h5><i class="fas fa-search-plus"></i> Missing Books Database</h5>
                         </div>
                         <div class="card-body">
-                            <div id="dashboard-database-info" class="mb-3">
-                                <!-- Database info will be loaded here -->
-                            </div>
-                            <!-- Author Processing Section -->
-                            <div class="row">
+                            <div class="row mb-3">
                                 <div class="col-md-6">
-                                    <h6 class="mb-3">Database Actions</h6>
-                                    <div class="btn-group-vertical d-grid gap-2" role="group">
-                                        <button class="btn btn-outline-warning" onclick="processAllAuthors()">
-                                            <i class="fas fa-users"></i> Process All Authors (Batch)
-                                        </button>
+                                    <h6 class="mb-3">Database Status</h6>
+                                    <div id="missing-books-stats" class="row">
+                                        <div class="col-sm-6 mb-2">
+                                            <div class="card bg-light">
+                                                <div class="card-body text-center py-2">
+                                                    <h6 class="mb-1" data-stat="missing-db-total">-</h6>
+                                                    <small class="text-muted">Total Missing</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-sm-6 mb-2">
+                                            <div class="card bg-light">
+                                                <div class="card-body text-center py-2">
+                                                    <h6 class="mb-1" data-stat="missing-db-recent">-</h6>
+                                                    <small class="text-muted">Recent (7 days)</small>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <h6 class="mb-3">Process Specific Author</h6>
-                                    <div class="input-group mb-3">
-                                        <input type="text" 
-                                               class="form-control" 
-                                               id="specific-author-input" 
-                                               placeholder="Enter author name..."
-                                               autocomplete="off">
-                                        <button class="btn btn-outline-info" 
-                                                type="button" 
-                                                onclick="processSpecificAuthor()"
-                                                id="process-specific-btn">
-                                            <i class="fas fa-user-check"></i> Process Author
+                                    <h6 class="mb-3">Bulk Processing</h6>
+                                    <div class="btn-group-vertical d-grid gap-2" role="group">
+                                        <button class="btn btn-outline-primary" onclick="populateMissingBooksDatabase()">
+                                            <i class="fas fa-cloud-download-alt"></i> Populate from OpenLibrary
+                                        </button>
+                                        <button class="btn btn-outline-warning" onclick="clearMissingBooksDatabase()">
+                                            <i class="fas fa-trash-alt"></i> Clear Missing Books Data
                                         </button>
                                     </div>
-                                    <div id="author-suggestions" class="list-group" style="display: none; max-height: 200px; overflow-y: auto;">
-                                        <!-- Author suggestions will appear here -->
-                                    </div>
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Start typing to see author suggestions
-                                    </small>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Stats Cards -->
             <div class="row mb-4">
                 <div class="col-md-3">
@@ -349,7 +347,46 @@
                 <button class="btn btn-outline-primary btn-sm ms-3" onclick="loadMissingBooks()">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>
+                <button class="btn btn-outline-success btn-sm ms-2" onclick="populateMissingBooksDatabase()">
+                    <i class="fas fa-cloud-download-alt"></i> Update from OpenLibrary
+                </button>
             </h1>
+
+            <!-- Missing Books Statistics -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body text-center">
+                            <h4 id="missing-stats-total">-</h4>
+                            <small>Total Missing</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body text-center">
+                            <h4 id="missing-stats-authors">-</h4>
+                            <small>Authors Affected</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body text-center">
+                            <h4 id="missing-stats-recent">-</h4>
+                            <small>Recent (7 days)</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-secondary text-white">
+                        <div class="card-body text-center">
+                            <h4 id="missing-stats-sources">-</h4>
+                            <small>Data Sources</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Search Missing Books -->
             <div class="mb-3">
@@ -584,6 +621,95 @@
         </div>
     </div>
 
+    <!-- Missing Books Population Progress Modal -->
+    <div class="modal fade" id="populationProgressModal" tabindex="-1" aria-labelledby="populationProgressModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="populationProgressModalLabel">
+                        <i class="fas fa-cloud-download-alt"></i> Populating Missing Books Database
+                    </h5>
+                    <div class="d-flex">
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="minimize-button" onclick="minimizeProgressModal()" title="Minimize">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <!-- Overall Progress -->
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-bold">Overall Progress</span>
+                            <span id="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress mb-2">
+                            <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <small class="text-muted">
+                                <span id="progress-processed">0</span> of <span id="progress-total">0</span> authors processed
+                            </small>
+                            <small class="text-muted">
+                                <span id="progress-missing-found">0</span> missing books found
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- Current Status -->
+                    <div class="mb-3">
+                        <h6>Current Status</h6>
+                        <div class="alert alert-info" id="current-status">
+                            <i class="fas fa-info-circle"></i> <span id="status-text">Initializing...</span>
+                        </div>
+                    </div>
+
+                    <!-- Current Author -->
+                    <div class="mb-3" id="current-author-section" style="display: none;">
+                        <h6>Processing Author</h6>
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <i class="fas fa-user"></i> <span id="current-author-name">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Verbose Log -->
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0">Activity Log</h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="clearProgressLog()">
+                                <i class="fas fa-trash-alt"></i> Clear
+                            </button>
+                        </div>
+                        <div id="progress-log" class="border rounded p-2 bg-light" style="height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.85em;">
+                            <!-- Progress log messages will appear here -->
+                        </div>
+                    </div>
+
+                    <!-- Error Summary -->
+                    <div id="error-section" style="display: none;">
+                        <h6 class="text-danger">Errors Encountered</h6>
+                        <div class="alert alert-warning">
+                            <div id="error-summary">
+                                <!-- Error summary will appear here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger" id="cancel-button" onclick="cancelPopulation()">
+                        <i class="fas fa-stop"></i> Cancel
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="close-button" onclick="closeProgressModal()" style="display: none;">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3">
         <div id="notification-toast" class="toast" role="alert">
@@ -597,6 +723,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

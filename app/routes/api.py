@@ -130,15 +130,40 @@ def get_author_detail(author_name):
 def get_all_missing_books():
     """API endpoint to get all missing books grouped by author."""
     try:
-        missing_books = get_missing_books(current_app.config["DB_PATH"])
+        from app.services.database import get_all_missing_books as get_db_missing_books
 
-        # Group by author
+        db_path = current_app.config["DB_PATH"]
+
+        # Get data from both sources
+        legacy_missing_books = get_missing_books(db_path)  # From author_book table
+        new_missing_books = get_db_missing_books(db_path)  # From missing_book table
+
+        # Group legacy books by author
         authors_missing = {}
-        for book in missing_books:
+        for book in legacy_missing_books:
             author = book["author"]
             if author not in authors_missing:
                 authors_missing[author] = []
-            authors_missing[author].append(book)
+            authors_missing[author].append(
+                {"title": book["title"], "source": "legacy", "discovered_at": None}
+            )
+
+        # Add new database books (avoiding duplicates)
+        for book in new_missing_books:
+            author = book["author"]
+            if author not in authors_missing:
+                authors_missing[author] = []
+
+            # Check for duplicates
+            existing_titles = {b["title"].lower() for b in authors_missing[author]}
+            if book["title"].lower() not in existing_titles:
+                authors_missing[author].append(
+                    {
+                        "title": book["title"],
+                        "source": book["source"],
+                        "discovered_at": book["discovered_at"],
+                    }
+                )
 
         return jsonify(authors_missing)
     except Exception as e:
@@ -149,12 +174,35 @@ def get_all_missing_books():
 def get_stats():
     """API endpoint for dashboard statistics."""
     try:
+        from app.services.database import get_missing_book_stats
+
         db_path = current_app.config["DB_PATH"]
         # Check if database file exists and has data
         exists = os.path.exists(db_path) and os.path.getsize(db_path) > 0
 
         if exists:
+            # Get legacy stats
             stats = get_database_stats(db_path)
+
+            # Get enhanced missing books stats from new database
+            try:
+                missing_stats = get_missing_book_stats(db_path)
+                # Merge stats with priority to new database if available
+                stats.update(
+                    {
+                        "total_missing": missing_stats["total_missing"]
+                        if missing_stats["total_missing"] > 0
+                        else stats.get("missing_books", 0),
+                        "authors_with_missing": missing_stats["authors_with_missing"]
+                        if missing_stats["authors_with_missing"] > 0
+                        else stats.get("authors_with_missing", 0),
+                        "missing_book_stats": missing_stats,  # Include detailed stats
+                    }
+                )
+            except Exception as e:
+                # Fallback to legacy stats if new database has issues
+                print(f"Warning: Could not get enhanced missing book stats: {e}")
+
             # Get database file modification time
             db_mtime = os.path.getmtime(db_path)
             from datetime import datetime
@@ -719,3 +767,331 @@ def sync_database_endpoint():
             return jsonify(result), 400
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/missing_books")
+def get_missing_books_api():
+    """API endpoint to get all missing books."""
+    try:
+        from app.services.database import get_all_missing_books
+
+        limit = request.args.get("limit", type=int)
+        db_path = current_app.config["DB_PATH"]
+
+        missing_books = get_all_missing_books(db_path, limit)
+
+        return jsonify(
+            {
+                "success": True,
+                "missing_books": missing_books,
+                "count": len(missing_books),
+            }
+        )
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error fetching missing books: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/missing_books/stats")
+def get_missing_books_stats_api():
+    """API endpoint to get missing books statistics."""
+    try:
+        from app.services.database import get_missing_book_stats
+
+        db_path = current_app.config["DB_PATH"]
+        stats = get_missing_book_stats(db_path)
+
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        return jsonify(
+            {"success": False, "error": f"Error fetching missing books stats: {str(e)}"}
+        ), 500
+
+
+@api_bp.route("/missing_books/author/<author_name>")
+def get_missing_books_by_author_api(author_name):
+    """API endpoint to get missing books for a specific author."""
+    try:
+        from app.services.database import get_missing_books_by_author
+
+        db_path = current_app.config["DB_PATH"]
+        missing_books = get_missing_books_by_author(db_path, author_name)
+
+        return jsonify(
+            {
+                "success": True,
+                "author": author_name,
+                "missing_books": missing_books,
+                "count": len(missing_books),
+            }
+        )
+    except Exception as e:
+        return jsonify(
+            {
+                "success": False,
+                "error": f"Error fetching missing books for {author_name}: {str(e)}",
+            }
+        ), 500
+
+
+@api_bp.route("/missing_books/populate", methods=["POST"])
+def populate_missing_books_api():
+    """API endpoint to populate missing books database from OpenLibrary."""
+    try:
+        from app.services.openlibrary import populate_missing_books_database
+
+        data = request.get_json() or {}
+        limit_authors = data.get("limit_authors")
+        verbose = data.get("verbose", False)
+
+        db_path = current_app.config["DB_PATH"]
+
+        result = populate_missing_books_database(db_path, limit_authors, verbose)
+
+        if result["success"]:
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify(
+            {
+                "success": False,
+                "error": f"Error populating missing books database: {str(e)}",
+            }
+        ), 500
+
+
+# Global variable to track population progress
+populate_progress = {
+    "active": False,
+    "cancelled": False,
+    "current_author": "",
+    "processed": 0,
+    "total": 0,
+    "missing_found": 0,
+    "errors": [],
+    "status": "idle",
+}
+
+
+@api_bp.route("/missing_books/populate/stream", methods=["GET"])
+def populate_missing_books_stream():
+    """API endpoint to populate missing books database with progress streaming."""
+    import json
+
+    from flask import Response
+
+    # Extract request data and config BEFORE creating generator
+    data = request.args.to_dict() or {}
+    limit_authors = data.get("limit_authors")
+    verbose = data.get("verbose", "false").lower() == "true"
+    db_path = current_app.config["DB_PATH"]
+
+    def generate_progress():
+        try:
+            import os
+            import time
+
+            from app.services.database import (
+                clear_missing_books,
+                get_author_books,
+                get_authors,
+            )
+            from app.services.openlibrary import compare_author_books
+
+            global populate_progress
+
+            # Reset progress
+            populate_progress.update(
+                {
+                    "active": True,
+                    "cancelled": False,
+                    "current_author": "",
+                    "processed": 0,
+                    "total": 0,
+                    "missing_found": 0,
+                    "errors": [],
+                    "status": "starting",
+                }
+            )
+
+            print(f"DEBUG: DB path is: {db_path}")
+            print(f"DEBUG: Current working directory: {os.getcwd()}")
+
+            # Send initial status
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+            # Clear existing missing books data
+            populate_progress.update(
+                {
+                    "status": "clearing",
+                    "message": "Clearing existing missing books data...",
+                }
+            )
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+            print("DEBUG: About to clear missing books")
+            clear_missing_books(db_path)
+            print("DEBUG: Cleared missing books successfully")
+
+            # Get all authors
+            populate_progress.update(
+                {
+                    "status": "loading_authors",
+                    "message": "Loading authors from database...",
+                }
+            )
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+            print("DEBUG: About to get authors")
+            authors = get_authors(db_path)
+            print(f"DEBUG: Got {len(authors)} authors")
+
+            original_count = len(authors)
+            if limit_authors:
+                authors = authors[:limit_authors]
+
+            populate_progress.update(
+                {
+                    "total": len(authors),
+                    "status": "processing",
+                    "message": f"Found {original_count} authors in database{f', processing first {len(authors)}' if limit_authors else f', processing all {len(authors)}'}",
+                }
+            )
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+            total_missing_books_found = 0
+            total_new_books_added = 0
+
+            for i, author in enumerate(authors, 1):
+                if populate_progress["cancelled"]:
+                    populate_progress.update(
+                        {
+                            "status": "cancelled",
+                            "message": "Population cancelled by user",
+                        }
+                    )
+                    yield f"data: {json.dumps(populate_progress)}\n\n"
+                    break
+
+                # Update current author progress
+                populate_progress.update(
+                    {
+                        "current_author": author,
+                        "processed": i,
+                        "message": f"Processing author {i}/{len(authors)}: {author}",
+                    }
+                )
+                yield f"data: {json.dumps(populate_progress)}\n\n"
+
+                try:
+                    # Get local books for this author
+                    local_books_data = get_author_books(db_path, author)
+                    local_books = [book["title"] for book in local_books_data]
+
+                    populate_progress.update(
+                        {
+                            "message": f"Found {len(local_books)} local books for {author}, querying OpenLibrary..."
+                        }
+                    )
+                    yield f"data: {json.dumps(populate_progress)}\n\n"
+
+                    # Compare with OpenLibrary
+                    result = compare_author_books(author, local_books, db_path, verbose)
+
+                    if result["success"]:
+                        missing_count = result.get("missing_count", 0)
+                        new_added = result.get("new_missing_books_added", 0)
+
+                        total_missing_books_found += missing_count
+                        total_new_books_added += new_added
+                        populate_progress["missing_found"] = total_missing_books_found
+
+                        # More detailed success message
+                        if missing_count > 0:
+                            populate_progress.update(
+                                {
+                                    "message": f"✓ {author}: Found {missing_count} missing books ({new_added} newly added to database)"
+                                }
+                            )
+                        else:
+                            populate_progress.update(
+                                {
+                                    "message": f"✓ {author}: No missing books found (all {len(local_books)} books are available)"
+                                }
+                            )
+                        yield f"data: {json.dumps(populate_progress)}\n\n"
+                    else:
+                        error_msg = result.get("message", "Unknown error")
+                        populate_progress["errors"].append(
+                            {"author": author, "error": error_msg}
+                        )
+                        populate_progress.update(
+                            {"message": f"✗ {author}: Error - {error_msg}"}
+                        )
+                        yield f"data: {json.dumps(populate_progress)}\n\n"
+
+                    # Small delay to be respectful to OpenLibrary API
+                    time.sleep(0.5)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    populate_progress["errors"].append(
+                        {"author": author, "error": error_msg}
+                    )
+                    populate_progress.update(
+                        {"message": f"✗ {author}: Exception - {error_msg}"}
+                    )
+                    yield f"data: {json.dumps(populate_progress)}\n\n"
+
+            # Final status
+            if not populate_progress["cancelled"]:
+                populate_progress.update(
+                    {
+                        "status": "completed",
+                        "active": False,
+                        "message": f"Population completed! Processed {len(authors)} authors, found {total_missing_books_found} missing books total ({total_new_books_added} newly added). {len(populate_progress['errors'])} errors occurred.",
+                    }
+                )
+            else:
+                populate_progress.update(
+                    {
+                        "active": False,
+                        "message": f"Population cancelled after processing {populate_progress['processed']}/{len(authors)} authors",
+                    }
+                )
+
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+        except Exception as e:
+            print(f"DEBUG: Exception occurred: {str(e)}")
+            print(f"DEBUG: Exception type: {type(e)}")
+            import traceback
+
+            print(f"DEBUG: Traceback: {traceback.format_exc()}")
+            populate_progress.update(
+                {"status": "error", "active": False, "message": str(e)}
+            )
+            yield f"data: {json.dumps(populate_progress)}\n\n"
+
+    return Response(
+        generate_progress(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@api_bp.route("/missing_books/populate/cancel", methods=["POST"])
+def cancel_populate_missing_books():
+    """API endpoint to cancel ongoing missing books population."""
+    global populate_progress
+    populate_progress["cancelled"] = True
+    return jsonify({"success": True, "message": "Cancellation requested"})
+
+
+@api_bp.route("/missing_books/populate/status")
+def get_populate_status():
+    """API endpoint to get current population status."""
+    global populate_progress
+    return jsonify(populate_progress)

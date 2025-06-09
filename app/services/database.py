@@ -250,6 +250,18 @@ def initialize_database(
         )
         """)
 
+        # Create the missing_book table for storing books found via OpenLibrary API
+        new_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS missing_book (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author TEXT NOT NULL,
+            title TEXT NOT NULL,
+            discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source TEXT DEFAULT 'openlibrary',
+            UNIQUE(author, title)
+        )
+        """)
+
         # Insert data with missing set to 0 (False)
         new_cursor.executemany(
             "INSERT INTO author_book (author, title, missing) VALUES (?, ?, ?)",
@@ -530,6 +542,9 @@ def migrate_database_schema(db_path: str) -> Dict[str, Any]:
         # Ensure the author_olid table exists (for detailed tracking)
         ensure_author_olid_table(db_path)
 
+        # Ensure the missing_book table exists
+        ensure_missing_book_table(db_path)
+
         conn.commit()
         conn.close()
 
@@ -794,3 +809,223 @@ def sync_with_calibre_metadata(db_path: str, calibre_db_path: str) -> Dict[str, 
 
     except Exception as e:
         return {"success": False, "message": f"Error during synchronization: {str(e)}"}
+
+
+def ensure_missing_book_table(db_path: str) -> None:
+    """Ensure the missing_book table exists for storing missing books found via OpenLibrary API."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS missing_book (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author TEXT NOT NULL,
+            title TEXT NOT NULL,
+            discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source TEXT DEFAULT 'openlibrary',
+            UNIQUE(author, title)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def store_missing_books(db_path: str, author: str, missing_books: List[str]) -> int:
+    """
+    Store missing books for an author in the missing_book table.
+
+    Args:
+        db_path: Path to the database
+        author: Author name
+        missing_books: List of missing book titles
+
+    Returns:
+        int: Number of new missing books added
+    """
+    if not missing_books:
+        return 0
+
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    new_books_added = 0
+
+    try:
+        for title in missing_books:
+            # Use INSERT OR IGNORE to avoid duplicates
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO missing_book (author, title, source) 
+                VALUES (?, ?, 'openlibrary')
+                """,
+                (author, title),
+            )
+            # Check if a row was actually inserted
+            if cursor.rowcount > 0:
+                new_books_added += 1
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+    return new_books_added
+
+
+def get_missing_books_by_author(db_path: str, author: str) -> List[Dict[str, Any]]:
+    """
+    Get all missing books for a specific author.
+
+    Args:
+        db_path: Path to the database
+        author: Author name
+
+    Returns:
+        List of missing books with metadata
+    """
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT title, discovered_at, source 
+        FROM missing_book 
+        WHERE author = ? 
+        ORDER BY discovered_at DESC
+        """,
+        (author,),
+    )
+
+    books = [
+        {"title": row[0], "discovered_at": row[1], "source": row[2]}
+        for row in cursor.fetchall()
+    ]
+
+    conn.close()
+    return books
+
+
+def get_all_missing_books(
+    db_path: str, limit: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get all missing books from the database.
+
+    Args:
+        db_path: Path to the database
+        limit: Optional limit on number of results
+
+    Returns:
+        List of missing books with metadata
+    """
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    query = """
+        SELECT author, title, discovered_at, source 
+        FROM missing_book 
+        ORDER BY discovered_at DESC
+    """
+
+    if limit:
+        query += f" LIMIT {limit}"
+
+    cursor.execute(query)
+
+    books = [
+        {"author": row[0], "title": row[1], "discovered_at": row[2], "source": row[3]}
+        for row in cursor.fetchall()
+    ]
+
+    conn.close()
+    return books
+
+
+def get_missing_book_stats(db_path: str) -> Dict[str, Any]:
+    """
+    Get statistics about missing books in the database.
+
+    Args:
+        db_path: Path to the database
+
+    Returns:
+        Dictionary with missing book statistics
+    """
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    # Total missing books
+    cursor.execute("SELECT COUNT(*) FROM missing_book")
+    total_missing = cursor.fetchone()[0]
+
+    # Authors with missing books
+    cursor.execute("SELECT COUNT(DISTINCT author) FROM missing_book")
+    authors_with_missing = cursor.fetchone()[0]
+
+    # Recent discoveries (last 7 days)
+    cursor.execute("""
+        SELECT COUNT(*) FROM missing_book 
+        WHERE discovered_at >= datetime('now', '-7 days')
+    """)
+    recent_discoveries = cursor.fetchone()[0]
+
+    # Top authors with most missing books
+    cursor.execute("""
+        SELECT author, COUNT(*) as missing_count 
+        FROM missing_book 
+        GROUP BY author 
+        ORDER BY missing_count DESC 
+        LIMIT 10
+    """)
+    top_authors = [
+        {"author": row[0], "missing_count": row[1]} for row in cursor.fetchall()
+    ]
+
+    conn.close()
+
+    return {
+        "total_missing": total_missing,
+        "authors_with_missing": authors_with_missing,
+        "recent_discoveries": recent_discoveries,
+        "top_authors": top_authors,
+    }
+
+
+def clear_missing_books(db_path: str, author: Optional[str] = None) -> int:
+    """
+    Clear missing books from the database.
+
+    Args:
+        db_path: Path to the database
+        author: Optional author name to clear only their missing books
+
+    Returns:
+        Number of records deleted
+    """
+    ensure_missing_book_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    if author:
+        cursor.execute("DELETE FROM missing_book WHERE author = ?", (author,))
+    else:
+        cursor.execute("DELETE FROM missing_book")
+
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    return deleted_count

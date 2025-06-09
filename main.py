@@ -56,7 +56,7 @@ def get_gunicorn_options():
 
     # Get configuration from environment variables with defaults
     options = {
-        "bind": os.environ.get("GUNICORN_BIND", "0.0.0.0:5001"),
+        "bind": os.environ.get("GUNICORN_BIND", "0.0.0.0:5000"),
         "workers": workers,
         "worker_class": os.environ.get("GUNICORN_WORKER_CLASS", "sync"),
         "worker_connections": int(os.environ.get("GUNICORN_WORKER_CONNECTIONS", 1000)),

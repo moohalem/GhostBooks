@@ -128,9 +128,7 @@ def filter_openlibrary_title(title: str) -> str:
     return filtered
 
 
-def smart_title_match(
-    local_title: str, filtered_openlibrary_titles: Set[str]
-) -> bool:
+def smart_title_match(local_title: str, filtered_openlibrary_titles: Set[str]) -> bool:
     """
     Check if a local title matches any filtered OpenLibrary title using smart matching.
 
@@ -151,8 +149,9 @@ def smart_title_match(
     local_normalized = local_title.lower().strip()
     # Replace punctuation with spaces for better word splitting
     import string
+
     for punct in string.punctuation:
-        local_normalized = local_normalized.replace(punct, ' ')
+        local_normalized = local_normalized.replace(punct, " ")
     local_words = set(word.strip() for word in local_normalized.split() if word.strip())
 
     for ol_title in filtered_openlibrary_titles:
@@ -162,7 +161,7 @@ def smart_title_match(
         ol_normalized = ol_title.lower().strip()
         # Replace punctuation with spaces for better word splitting
         for punct in string.punctuation:
-            ol_normalized = ol_normalized.replace(punct, ' ')
+            ol_normalized = ol_normalized.replace(punct, " ")
         ol_words = set(word.strip() for word in ol_normalized.split() if word.strip())
 
         # Check if local title contains all words from OpenLibrary title
@@ -202,9 +201,14 @@ def process_openlibrary_titles(
 
 
 def compare_author_books(
-    author: str, local_books: List[str], db_path: Optional[str] = None, verbose: bool = False
+    author: str,
+    local_books: List[str],
+    db_path: Optional[str] = None,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
-    """Compare local books with OpenLibrary books for an author."""
+    """Compare local books with OpenLibrary books for an author and store missing books."""
+    from .database import store_missing_books  # Import here to avoid circular imports
+
     author_key = get_author_key(author, db_path, verbose)
     if not author_key:
         return {
@@ -235,9 +239,24 @@ def compare_author_books(
             if smart_title_match(local_book, {title}):
                 found_match = True
                 break
-        
+
         if not found_match:
             missing_books.append(title)
+
+    # Store missing books in the database if db_path is provided
+    new_missing_books_added = 0
+    if db_path and missing_books:
+        try:
+            new_missing_books_added = store_missing_books(
+                db_path, author, missing_books
+            )
+            if verbose:
+                print(
+                    f"[VERBOSE] Stored {new_missing_books_added} new missing books for {author}"
+                )
+        except Exception as e:
+            if verbose:
+                print(f"[VERBOSE] Error storing missing books: {e}")
 
     return {
         "success": True,
@@ -247,4 +266,101 @@ def compare_author_books(
         "openlibrary_count": len(openlibrary_books),
         "missing_count": len(missing_books),
         "missing_books": missing_books,
+        "new_missing_books_added": new_missing_books_added,
     }
+
+
+def populate_missing_books_database(
+    db_path: str, limit_authors: Optional[int] = None, verbose: bool = False
+) -> Dict[str, Any]:
+    """
+    Populate the missing_book database by comparing all authors with OpenLibrary.
+
+    Args:
+        db_path: Path to the database
+        limit_authors: Optional limit on number of authors to process
+        verbose: Enable verbose logging
+
+    Returns:
+        Dictionary with processing results
+    """
+    from .database import clear_missing_books, get_author_books, get_authors
+
+    if verbose:
+        print("[VERBOSE] Starting missing books database population...")
+
+    try:
+        # Clear existing missing books data
+        cleared_count = clear_missing_books(db_path)
+        if verbose:
+            print(f"[VERBOSE] Cleared {cleared_count} existing missing book records")
+
+        # Get all authors
+        authors = get_authors(db_path)
+        if limit_authors:
+            authors = authors[:limit_authors]
+
+        if verbose:
+            print(f"[VERBOSE] Processing {len(authors)} authors...")
+
+        total_authors_processed = 0
+        total_missing_books_found = 0
+        total_new_books_added = 0
+        authors_with_errors = []
+
+        for i, author in enumerate(authors, 1):
+            if verbose:
+                print(f"[VERBOSE] Processing author {i}/{len(authors)}: {author}")
+
+            try:
+                # Get local books for this author
+                local_books_data = get_author_books(db_path, author)
+                local_books = [book["title"] for book in local_books_data]
+
+                # Compare with OpenLibrary
+                result = compare_author_books(author, local_books, db_path, verbose)
+
+                if result["success"]:
+                    total_authors_processed += 1
+                    missing_count = result.get("missing_count", 0)
+                    new_added = result.get("new_missing_books_added", 0)
+
+                    total_missing_books_found += missing_count
+                    total_new_books_added += new_added
+
+                    if verbose and missing_count > 0:
+                        print(
+                            f"[VERBOSE] Found {missing_count} missing books for {author} ({new_added} new)"
+                        )
+                else:
+                    authors_with_errors.append(
+                        {"author": author, "error": result["message"]}
+                    )
+                    if verbose:
+                        print(
+                            f"[VERBOSE] Error processing {author}: {result['message']}"
+                        )
+
+                # Small delay to be respectful to OpenLibrary API
+                time.sleep(0.5)
+
+            except Exception as e:
+                authors_with_errors.append({"author": author, "error": str(e)})
+                if verbose:
+                    print(f"[VERBOSE] Exception processing {author}: {e}")
+
+        return {
+            "success": True,
+            "message": f"Processed {total_authors_processed} authors successfully",
+            "total_authors_processed": total_authors_processed,
+            "total_missing_books_found": total_missing_books_found,
+            "total_new_books_added": total_new_books_added,
+            "authors_with_errors": len(authors_with_errors),
+            "error_details": authors_with_errors,
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error during missing books population: {str(e)}",
+        }

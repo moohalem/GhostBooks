@@ -19,14 +19,11 @@ let progressModalManager = null;
  */
 function initializeApp() {
     console.log('Initializing Calibre Monitor application...');
-    console.log('Loading modules:', { Utils, API, Views });
     
     // Initialize managers
     ircSearchManager = new IRCSearchManager();
     autoRefreshManager = new AutoRefreshManager();
     progressModalManager = new ProgressModalManager();
-    
-    console.log('Managers initialized:', { ircSearchManager, autoRefreshManager, progressModalManager });
     
     // Set up initial navigation
     setupNavigation();
@@ -260,122 +257,63 @@ window.populateLibrary = async function() {
     }
 };
 
-// Additional global functions for onclick handlers
-window.refreshStats = async function() {
-    await Views.showDashboard();
-};
-
-window.populateMissingBooksDatabase = async function() {
-    if (progressModalManager) {
-        progressModalManager.startPopulation('missing-books');
+// Database functions
+window.clearOlidCache = async function() {
+    try {
+        Utils.showLoading(true);
+        await API.clearOlidCache();
+        Utils.showToast('OLID cache cleared successfully', 'success');
+        await Views.showSettings(); // Refresh settings view
+    } catch (error) {
+        Utils.showToast('Failed to clear OLID cache', 'danger');
+        console.error('Error clearing OLID cache:', error);
+    } finally {
+        Utils.showLoading(false);
     }
 };
 
-window.clearMissingBooksDatabase = async function() {
-    if (confirm('Are you sure you want to clear the missing books database? This action cannot be undone.')) {
+window.clearDatabase = async function() {
+    if (confirm('Are you sure you want to clear the entire database? This action cannot be undone.')) {
         try {
             Utils.showLoading(true);
-            await API.clearMissingBooksDatabase();
-            Utils.showToast('Missing books database cleared successfully', 'success');
-            await Views.showDashboard();
+            await API.clearDatabase();
+            Utils.showToast('Database cleared successfully', 'success');
+            await Views.showDashboard(); // Refresh to dashboard
         } catch (error) {
-            Utils.showToast('Failed to clear missing books database', 'danger');
-            console.error('Error clearing missing books database:', error);
+            Utils.showToast('Failed to clear database', 'danger');
+            console.error('Error clearing database:', error);
         } finally {
             Utils.showLoading(false);
         }
     }
 };
 
-window.loadAuthors = async function() {
-    await Views.showAuthors();
-};
-
-window.loadMissingBooks = async function() {
-    await Views.showMissing();
-};
-
-window.updateAuthorFromAPI = async function() {
-    // This function needs to be implemented based on selected author
-    const selectedAuthor = window.selectedAuthor || window.currentAuthor;
-    if (selectedAuthor) {
-        await window.refreshAuthor(selectedAuthor);
-    } else {
-        Utils.showToast('No author selected', 'warning');
-    }
-};
-
-window.searchMissingOnIRC = async function() {
-    const selectedAuthor = window.selectedAuthor || window.currentAuthor;
-    if (selectedAuthor) {
-        window.searchAuthorIRC(selectedAuthor);
-    } else {
-        Utils.showToast('No author selected', 'warning');
-    }
-};
-
-window.clearAuthorSelection = function() {
-    window.selectedAuthor = null;
-    window.currentAuthor = null;
-    // Clear any UI selection indicators
-    const selectedItems = document.querySelectorAll('.author-selected');
-    selectedItems.forEach(item => item.classList.remove('author-selected'));
-};
-
-window.locateMetadataDb = async function() {
+// Pagination functions
+window.loadAuthorsPage = async function(page, search = '') {
     try {
         Utils.showLoading(true);
-        const result = await API.locateMetadataDb();
-        if (result.found) {
-            Utils.showToast('Metadata database located successfully', 'success');
-            await Views.showSettings();
-        } else {
-            Utils.showToast('Metadata database not found', 'warning');
-        }
+        await Views.loadAuthorsData(page, search);
     } catch (error) {
-        Utils.showToast('Failed to locate metadata database', 'danger');
-        console.error('Error locating metadata database:', error);
+        Utils.showToast('Failed to load authors page', 'danger');
+        console.error('Error loading authors page:', error);
     } finally {
         Utils.showLoading(false);
     }
 };
 
-window.verifyMetadataPath = async function() {
-    try {
-        Utils.showLoading(true);
-        const result = await API.verifyMetadataPath();
-        if (result.valid) {
-            Utils.showToast('Metadata path is valid', 'success');
-        } else {
-            Utils.showToast('Metadata path is invalid', 'danger');
-        }
-    } catch (error) {
-        Utils.showToast('Failed to verify metadata path', 'danger');
-        console.error('Error verifying metadata path:', error);
-    } finally {
-        Utils.showLoading(false);
+// Search functions
+window.searchAuthors = async function() {
+    const searchInput = document.getElementById('author-search');
+    if (searchInput) {
+        await performAuthorSearch(searchInput.value);
     }
 };
 
-window.initializeDatabase = async function() {
-    if (confirm('Are you sure you want to initialize the database? This will clear existing data.')) {
-        try {
-            Utils.showLoading(true);
-            await API.initializeDatabase();
-            Utils.showToast('Database initialized successfully', 'success');
-            await Views.showDashboard();
-        } catch (error) {
-            Utils.showToast('Failed to initialize database', 'danger');
-            console.error('Error initializing database:', error);
-        } finally {
-            Utils.showLoading(false);
-        }
-    }
-};
-
-window.searchSingleBook = async function(author, title) {
-    if (ircSearchManager) {
-        ircSearchManager.searchSingleBook(author, title);
+window.clearSearch = async function() {
+    const searchInput = document.getElementById('author-search');
+    if (searchInput) {
+        searchInput.value = '';
+        await performAuthorSearch('');
     }
 };
 
