@@ -19,6 +19,7 @@ from app.services.database import (
     get_database_connection,
     get_database_stats,
     get_metadata_db_info,
+    get_missing_book_stats,
     get_missing_books,
     get_recently_processed_authors,
     migrate_database_schema,
@@ -174,8 +175,6 @@ def get_all_missing_books():
 def get_stats():
     """API endpoint for dashboard statistics."""
     try:
-        from app.services.database import get_missing_book_stats
-
         db_path = current_app.config["DB_PATH"]
         # Check if database file exists and has data
         exists = os.path.exists(db_path) and os.path.getsize(db_path) > 0
@@ -227,6 +226,47 @@ def search_authors_endpoint():
 
         authors = search_authors(current_app.config["DB_PATH"], query)
         return jsonify(authors)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/search_authors/autocomplete")
+def search_authors_autocomplete():
+    """API endpoint for autocomplete search suggestions with stats."""
+    try:
+        query = request.args.get("q", "").strip()
+        limit = int(request.args.get("limit", 10))
+
+        if not query:
+            # Return popular authors when no query
+            from app.services.database import get_popular_authors
+
+            authors = get_popular_authors(current_app.config["DB_PATH"], limit)
+            return jsonify(
+                {
+                    "suggestions": authors,
+                    "query": "",
+                    "type": "popular",
+                    "message": "Popular authors",
+                }
+            )
+
+        if len(query) < 2:
+            return jsonify({"suggestions": [], "query": query, "type": "too_short"})
+
+        from app.services.database import search_authors_with_stats
+
+        authors = search_authors_with_stats(current_app.config["DB_PATH"], query, limit)
+
+        return jsonify(
+            {
+                "suggestions": authors,
+                "query": query,
+                "type": "search_results",
+                "count": len(authors),
+                "message": f"Found {len(authors)} author{'s' if len(authors) != 1 else ''}",
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -797,8 +837,6 @@ def get_missing_books_api():
 def get_missing_books_stats_api():
     """API endpoint to get missing books statistics."""
     try:
-        from app.services.database import get_missing_book_stats
-
         db_path = current_app.config["DB_PATH"]
         stats = get_missing_book_stats(db_path)
 

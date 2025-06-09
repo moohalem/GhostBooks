@@ -306,10 +306,13 @@ def get_author_books(db_path: str, author_name: str) -> List[Dict[str, Any]]:
     conn = get_database_connection(db_path)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT title, missing FROM author_book WHERE author = ? ORDER BY title",
+        "SELECT id, title, missing FROM author_book WHERE author = ? ORDER BY title",
         (author_name,),
     )
-    books = [{"title": row[0], "missing": bool(row[1])} for row in cursor.fetchall()]
+    books = [
+        {"id": row[0], "title": row[1], "missing": bool(row[2])}
+        for row in cursor.fetchall()
+    ]
     conn.close()
     return books
 
@@ -377,6 +380,97 @@ def search_authors(db_path: str, query: str) -> List[str]:
         (f"%{query}%",),
     )
     authors = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return authors
+
+
+def search_authors_with_stats(
+    db_path: str, query: str, limit: int = 20
+) -> List[Dict[str, Any]]:
+    """Search for authors by name pattern with detailed stats for autocomplete."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    # Search with case-insensitive matching and return stats
+    cursor.execute(
+        """
+        SELECT 
+            ab.author,
+            COUNT(*) as total_books,
+            SUM(CASE WHEN ab.missing = 1 THEN 1 ELSE 0 END) as missing_books,
+            MAX(ap.last_processed_at) as last_processed
+        FROM author_book ab
+        LEFT JOIN author_processing ap ON ab.author = ap.author
+        WHERE LOWER(ab.author) LIKE LOWER(?)
+        GROUP BY ab.author
+        ORDER BY 
+            CASE 
+                WHEN LOWER(ab.author) LIKE LOWER(?) THEN 1  -- Exact match first
+                WHEN LOWER(ab.author) LIKE LOWER(?) THEN 2  -- Starts with query
+                ELSE 3  -- Contains query
+            END,
+            ab.author
+        LIMIT ?
+    """,
+        (
+            f"%{query}%",  # Main search filter
+            query,  # Exact match priority
+            f"{query}%",  # Starts with priority
+            limit,
+        ),
+    )
+
+    authors = []
+    for row in cursor.fetchall():
+        authors.append(
+            {
+                "id": row[0],  # Use author name as ID for now
+                "name": row[0],
+                "total_books": row[1],
+                "missing_books": row[2] or 0,
+                "last_processed": row[3],
+                "completion_rate": round(((row[1] - (row[2] or 0)) / row[1]) * 100, 1)
+                if row[1] > 0
+                else 0,
+            }
+        )
+
+    conn.close()
+    return authors
+
+
+def get_popular_authors(db_path: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get most popular authors (by book count) for search suggestions."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT 
+            author,
+            COUNT(*) as total_books,
+            SUM(CASE WHEN missing = 1 THEN 1 ELSE 0 END) as missing_books
+        FROM author_book
+        GROUP BY author
+        ORDER BY total_books DESC, author
+        LIMIT ?
+    """,
+        (limit,),
+    )
+
+    authors = []
+    for row in cursor.fetchall():
+        authors.append(
+            {
+                "name": row[0],
+                "total_books": row[1],
+                "missing_books": row[2] or 0,
+                "completion_rate": round(((row[1] - (row[2] or 0)) / row[1]) * 100, 1)
+                if row[1] > 0
+                else 0,
+            }
+        )
+
     conn.close()
     return authors
 

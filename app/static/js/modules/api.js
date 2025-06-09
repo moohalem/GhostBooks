@@ -155,6 +155,17 @@ export async function searchAuthors(query) {
 }
 
 /**
+ * Search authors with autocomplete suggestions
+ */
+export async function searchAuthorsAutocomplete(query, limit = 10) {
+    const params = new URLSearchParams({ 
+        q: query || '', 
+        limit: limit.toString() 
+    });
+    return await apiRequest(`/api/search_authors/autocomplete?${params}`);
+}
+
+/**
  * Load database information
  * @returns {Promise<Object>} Database info
  */

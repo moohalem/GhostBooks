@@ -127,23 +127,32 @@ export async function showSettings() {
  * Author Detail View Functions
  */
 export async function showAuthorDetail(authorName) {
+    console.log('showAuthorDetail called with:', authorName);
     hideAllViews();
     showLoading(true);
     
     try {
+        console.log('Loading author detail for:', authorName);
         const authorData = await loadAuthorDetail(authorName);
+        console.log('Author data received:', authorData);
         
         // Update author detail view
         updateAuthorDetailView(authorData);
         
-        document.getElementById('author-detail-view').style.display = 'block';
+        const authorDetailView = document.getElementById('author-detail-view');
+        if (authorDetailView) {
+            authorDetailView.style.display = 'block';
+            console.log('Author detail view displayed');
+        } else {
+            console.error('Author detail view element not found');
+        }
         
         // Store current author for refresh
         window.currentAuthor = authorName;
         
     } catch (error) {
-        showToast(`Failed to load author: ${authorName}`, 'danger');
         console.error('Error loading author detail:', error);
+        showToast(`Failed to load author: ${authorName}`, 'danger');
     } finally {
         showLoading(false);
     }
@@ -473,19 +482,40 @@ function updateRecentAuthors(authors) {
 }
 
 function updateAuthorDetailView(authorData) {
+    console.log('updateAuthorDetailView called with:', authorData);
+    
     // Update author name
-    const authorNameEl = document.getElementById('author-detail-name');
+    const authorNameEl = document.getElementById('author-name');
     if (authorNameEl) {
         authorNameEl.textContent = authorData.author;
+        console.log('Updated author name to:', authorData.author);
+    } else {
+        console.error('author-name element not found');
+    }
+    
+    // Update book counts
+    const allBooksCountEl = document.getElementById('all-books-count');
+    const missingBooksCountEl = document.getElementById('missing-books-count');
+    
+    if (allBooksCountEl) {
+        allBooksCountEl.textContent = authorData.total_books || 0;
+        console.log('Updated all books count to:', authorData.total_books);
+    } else {
+        console.error('all-books-count element not found');
+    }
+    
+    if (missingBooksCountEl) {
+        missingBooksCountEl.textContent = authorData.missing_count || 0;
+        console.log('Updated missing books count to:', authorData.missing_count);
+    } else {
+        console.error('missing-books-count element not found');
     }
     
     // Update stats
     updateAuthorStats(authorData);
     
-    // Update books table
-    updateAuthorBooksTable(authorData.all_books || []);
-    
-    // Update missing books table
+    // Update books tables
+    updateAuthorBooksTable(authorData.books || []);
     updateAuthorMissingBooksTable(authorData.missing_books || []);
 }
 
@@ -516,10 +546,14 @@ function updateAuthorStats(authorData) {
 }
 
 function updateAuthorBooksTable(books) {
+    console.log('updateAuthorBooksTable called with:', books);
     const tbody = document.getElementById('all-books-list');
-    if (!tbody) return;
+    if (!tbody) {
+        console.error('all-books-list element not found');
+        return;
+    }
     
-    tbody.innerHTML = books.map(book => `
+    const html = books.map(book => `
         <tr>
             <td>${escapeHtml(book.title)}</td>
             <td>
@@ -529,6 +563,9 @@ function updateAuthorBooksTable(books) {
             </td>
         </tr>
     `).join('');
+    
+    tbody.innerHTML = html;
+    console.log('Updated books table with', books.length, 'books');
 }
 
 function updateAuthorMissingBooksTable(missingBooks) {

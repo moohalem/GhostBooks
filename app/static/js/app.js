@@ -43,6 +43,9 @@ function initializeApp() {
     // Set up population tracking
     setupPopulationTracking();
     
+    // Set up global keyboard shortcuts
+    setupKeyboardShortcuts();
+    
     // Show initial view
     Views.showDashboard();
     
@@ -79,26 +82,91 @@ function setupNavigation() {
 }
 
 /**
- * Set up search functionality
+ * Set up search functionality with autocomplete
  */
 function setupSearch() {
+    console.log('Setting up search functionality...');
     const searchInput = document.getElementById('author-search');
-    if (searchInput) {
-        // Use debounced search from utils
-        const debouncedSearch = Utils.debounce(async (searchTerm) => {
-            await performAuthorSearch(searchTerm);
-        }, 300);
-        
-        searchInput.addEventListener('input', (e) => {
-            debouncedSearch(e.target.value);
+    const autocompleteDropdown = document.getElementById('autocomplete-dropdown');
+    const clearButton = document.getElementById('clear-search');
+    const searchButton = document.getElementById('search-btn');
+    
+    console.log('Search elements found:', { 
+        searchInput: !!searchInput, 
+        autocompleteDropdown: !!autocompleteDropdown,
+        clearButton: !!clearButton,
+        searchButton: !!searchButton
+    });
+    
+    if (searchInput && autocompleteDropdown) {
+        console.log('Creating autocomplete instance...');
+        // Create autocomplete instance
+        const autocomplete = new Utils.Autocomplete(searchInput, autocompleteDropdown, {
+            minLength: 2,
+            delay: 300,
+            maxResults: 10,
+            searchFunction: async (query) => {
+                console.log('Autocomplete search for:', query);
+                try {
+                    const response = await API.searchAuthorsAutocomplete(query, 10);
+                    console.log('Autocomplete response:', response);
+                    return {
+                        suggestions: response.suggestions || [],
+                        type: response.type,
+                        message: response.message
+                    };
+                } catch (error) {
+                    console.error('Autocomplete search error:', error);
+                    return { suggestions: [] };
+                }
+            },
+            onSelect: (item) => {
+                console.log('Author selected from autocomplete:', item);
+                // When an author is selected from autocomplete, show their details
+                if (item.name) {
+                    Views.showAuthorDetail(item.name);
+                } else {
+                    // Fallback to regular search
+                    performAuthorSearch(item.name || searchInput.value);
+                }
+            }
         });
         
+        // Show/hide clear button based on input content
+        searchInput.addEventListener('input', (e) => {
+            if (clearButton) {
+                clearButton.style.display = e.target.value.trim() ? 'block' : 'none';
+            }
+        });
+        
+        // Clear button functionality
+        if (clearButton) {
+            clearButton.addEventListener('click', () => {
+                searchInput.value = '';
+                clearButton.style.display = 'none';
+                searchInput.focus();
+                // Reset to show all authors
+                Views.loadAuthorsData(1, '');
+            });
+        }
+        
+        // Search button functionality
+        if (searchButton) {
+            searchButton.addEventListener('click', () => {
+                performAuthorSearch(searchInput.value);
+            });
+        }
+        
+        // Also keep the regular search functionality for Enter key
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 performAuthorSearch(e.target.value);
             }
         });
+        
+        // Store reference for later use
+        window.authorAutocomplete = autocomplete;
     }
 }
 
@@ -209,6 +277,38 @@ async function handlePopulation(type) {
             await populateLibrary();
             break;
     }
+}
+
+/**
+ * Set up global keyboard shortcuts
+ */
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+K or Cmd+K to focus search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            const searchInput = document.getElementById('author-search');
+            if (searchInput) {
+                searchInput.focus();
+                Utils.showToast('Search focused (Ctrl+K)', 'info');
+            }
+        }
+        
+        // Escape to clear search and show all authors
+        if (e.key === 'Escape') {
+            const searchInput = document.getElementById('author-search');
+            if (searchInput && document.activeElement === searchInput) {
+                searchInput.blur();
+                if (searchInput.value.trim()) {
+                    searchInput.value = '';
+                    const clearButton = document.getElementById('clear-search');
+                    if (clearButton) clearButton.style.display = 'none';
+                    Views.loadAuthorsData(1, '');
+                    Utils.showToast('Search cleared', 'info');
+                }
+            }
+        }
+    });
 }
 
 /**
