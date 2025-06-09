@@ -147,24 +147,31 @@ def smart_title_match(
     if not local_title:
         return False
 
-    # Normalize local title for comparison
+    # Normalize local title for comparison (remove punctuation for word splitting)
     local_normalized = local_title.lower().strip()
-    local_words = set(local_normalized.split())
+    # Replace punctuation with spaces for better word splitting
+    import string
+    for punct in string.punctuation:
+        local_normalized = local_normalized.replace(punct, ' ')
+    local_words = set(word.strip() for word in local_normalized.split() if word.strip())
 
     for ol_title in filtered_openlibrary_titles:
         if not ol_title:
             continue
 
         ol_normalized = ol_title.lower().strip()
-        ol_words = set(ol_normalized.split())
+        # Replace punctuation with spaces for better word splitting
+        for punct in string.punctuation:
+            ol_normalized = ol_normalized.replace(punct, ' ')
+        ol_words = set(word.strip() for word in ol_normalized.split() if word.strip())
 
         # Check if local title contains all words from OpenLibrary title
         # This allows "Home Coming: Escaping From Alcatraz" to match "Home Coming"
         if ol_words.issubset(local_words):
             return True
 
-        # Also check exact match after normalization
-        if local_normalized == ol_normalized:
+        # Also check exact match after normalization (original logic)
+        if local_title.lower().strip() == ol_title.lower().strip():
             return True
 
     return False
