@@ -30,6 +30,7 @@ from app.services.database import (
 )
 from app.services.irc import get_search_status, start_irc_search
 from app.services.openlibrary import compare_author_books
+from config.config_manager import config_manager
 
 api_bp = Blueprint("api", __name__)
 
@@ -480,12 +481,18 @@ def get_current_metadata_info():
     try:
         calibre_db_path = current_app.config.get("CALIBRE_DB_PATH", "metadata.db")
 
+        # Check if configuration is persistent
+        has_persistent_config = config_manager.has_calibre_db_path()
+        persistent_path = config_manager.get_calibre_db_path()
+
         if not os.path.exists(calibre_db_path):
             return jsonify(
                 {
                     "success": True,
                     "exists": False,
                     "configured_path": calibre_db_path,
+                    "has_persistent_config": has_persistent_config,
+                    "persistent_path": persistent_path,
                     "message": "Configured metadata.db not found",
                 }
             )
@@ -496,6 +503,54 @@ def get_current_metadata_info():
                 "success": True,
                 "exists": True,
                 "configured_path": calibre_db_path,
+                "has_persistent_config": has_persistent_config,
+                "persistent_path": persistent_path,
+                "info": db_info,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/metadata/update_path", methods=["POST"])
+def update_metadata_path():
+    """API endpoint to update the metadata database path configuration."""
+    try:
+        data = request.get_json()
+        if not data or "path" not in data:
+            return jsonify({"error": "Path is required"}), 400
+
+        new_path = data["path"]
+
+        # Verify the path exists and is a valid Calibre database
+        if not os.path.exists(new_path):
+            return jsonify({"success": False, "error": "File does not exist"}), 400
+
+        if not verify_calibre_database(new_path):
+            return jsonify(
+                {"success": False, "error": "Not a valid Calibre database"}
+            ), 400
+
+        # Update the application configuration
+        current_app.config["CALIBRE_DB_PATH"] = new_path
+
+        # Save the configuration persistently
+        if not config_manager.set_calibre_db_path(new_path):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to save configuration persistently",
+                }
+            ), 500
+
+        # Get database info for confirmation
+        db_info = get_metadata_db_info(new_path)
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Metadata database path updated and saved persistently: {new_path}",
+                "path": new_path,
                 "info": db_info,
             }
         )

@@ -37,4 +37,5 @@ data/
 *.db
 
 .vscode
+config/app_config.json
 

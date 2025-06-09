@@ -263,6 +263,30 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('beforeunload', () => {
         autoRefreshManager.stop();
     });
+    
+    // Handle database initialization card toggle
+    const initToggle = document.getElementById('database-init-toggle');
+    const initCollapse = document.getElementById('database-init-collapse');
+    
+    if (initToggle && initCollapse) {
+        initCollapse.addEventListener('show.bs.collapse', function() {
+            const chevron = initToggle.querySelector('.float-end');
+            if (chevron) {
+                chevron.className = 'fas fa-chevron-down float-end';
+            }
+            initToggle.classList.remove('collapsed');
+            initToggle.setAttribute('aria-expanded', 'true');
+        });
+        
+        initCollapse.addEventListener('hide.bs.collapse', function() {
+            const chevron = initToggle.querySelector('.float-end');
+            if (chevron) {
+                chevron.className = 'fas fa-chevron-right float-end';
+            }
+            initToggle.classList.add('collapsed');
+            initToggle.setAttribute('aria-expanded', 'false');
+        });
+    }
 });
 
 // Keyboard shortcuts
@@ -997,7 +1021,8 @@ function updateActiveNav(activeView) {
     const navLinks = {
         'dashboard': 0,
         'authors': 1, 
-        'missing': 2
+        'missing': 2,
+        'settings': 3
     };
     
     const navLinkIndex = navLinks[activeView];
@@ -1697,6 +1722,8 @@ async function pollIRCSearchStatusSidebar(author) {
 function showSettings() {
     hideAllViews();
     document.getElementById('settings-view').style.display = 'block';
+    // Update active nav
+    updateActiveNav('settings');
     loadMetadataInfo();
     loadDatabaseInfo();
     refreshOlidCacheStats();
@@ -1704,6 +1731,10 @@ function showSettings() {
 
 async function loadMetadataInfo() {
     const statusDiv = document.getElementById('metadata-status');
+    const initCard = document.getElementById('database-init-card');
+    const initCollapse = document.getElementById('database-init-collapse');
+    const initToggle = document.getElementById('database-init-toggle');
+    const initChevron = document.getElementById('database-init-chevron');
     
     try {
         const response = await fetch('/api/metadata/info');
@@ -1711,6 +1742,7 @@ async function loadMetadataInfo() {
         
         if (data.success) {
             if (data.exists) {
+                // Database found - show success status and collapse the initialization card
                 statusDiv.innerHTML = `
                     <div class="alert alert-success">
                         <i class="fas fa-check-circle"></i> 
@@ -1719,7 +1751,26 @@ async function loadMetadataInfo() {
                         <small>Books: ${data.info.books}, Authors: ${data.info.authors}</small>
                     </div>
                 `;
+                
+                // Collapse the initialization card and update header to show found status
+                if (initCollapse && initToggle) {
+                    // Hide the collapse content
+                    const bsCollapse = bootstrap.Collapse.getOrCreateInstance(initCollapse);
+                    bsCollapse.hide();
+                    
+                    // Update header text to show database found
+                    initToggle.innerHTML = `
+                        <i class="fas fa-database text-success"></i> Database Initialization - <span class="text-success">Metadata Database Found</span>
+                        <i class="fas fa-chevron-right float-end"></i>
+                    `;
+                    
+                    // Update the toggle to indicate collapsed state
+                    initToggle.setAttribute('aria-expanded', 'false');
+                    initToggle.classList.add('collapsed');
+                }
+                
             } else {
+                // Database not found - show warning and ensure card is expanded
                 statusDiv.innerHTML = `
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle"></i> 
@@ -1728,6 +1779,23 @@ async function loadMetadataInfo() {
                         <small>Please locate or verify the path below</small>
                     </div>
                 `;
+                
+                // Ensure the initialization card is expanded
+                if (initCollapse && initToggle) {
+                    // Show the collapse content
+                    const bsCollapse = bootstrap.Collapse.getOrCreateInstance(initCollapse);
+                    bsCollapse.show();
+                    
+                    // Update header text to show database not found
+                    initToggle.innerHTML = `
+                        <i class="fas fa-database text-warning"></i> Database Initialization - <span class="text-warning">Setup Required</span>
+                        <i class="fas fa-chevron-down float-end"></i>
+                    `;
+                    
+                    // Update the toggle to indicate expanded state
+                    initToggle.setAttribute('aria-expanded', 'true');
+                    initToggle.classList.remove('collapsed');
+                }
             }
         } else {
             throw new Error(data.error || 'Failed to load metadata info');
@@ -1739,15 +1807,28 @@ async function loadMetadataInfo() {
                 <strong>Error loading metadata info:</strong> ${error.message}
             </div>
         `;
+        
+        // On error, ensure the initialization card is expanded for troubleshooting
+        if (initCollapse && initToggle) {
+            const bsCollapse = bootstrap.Collapse.getOrCreateInstance(initCollapse);
+            bsCollapse.show();
+            initToggle.innerHTML = `
+                <i class="fas fa-database text-danger"></i> Database Initialization - <span class="text-danger">Error</span>
+                <i class="fas fa-chevron-down float-end"></i>
+            `;
+            initToggle.setAttribute('aria-expanded', 'true');
+            initToggle.classList.remove('collapsed');
+        }
     }
 }
 
 async function loadDatabaseInfo() {
-    const infoDiv = document.getElementById('database-info');
+    // Check both dashboard and settings database info divs
+    const dashboardInfoDiv = document.getElementById('dashboard-database-info');
+    const settingsInfoDiv = document.getElementById('database-info');
     
-    // Ensure we have the div
-    if (!infoDiv) {
-        console.error('database-info div not found');
+    if (!dashboardInfoDiv && !settingsInfoDiv) {
+        console.error('No database-info divs found');
         return;
     }
     
@@ -1760,8 +1841,10 @@ async function loadDatabaseInfo() {
         
         const data = await response.json();
         
+        let contentHtml = '';
+        
         if (data.exists) {
-            infoDiv.innerHTML = `
+            contentHtml = `
                 <div class="row">
                     <div class="col-md-4">
                         <div class="card bg-light">
@@ -1791,21 +1874,37 @@ async function loadDatabaseInfo() {
                 <p class="mt-3 text-muted">Database last updated: <em>${data.last_modified || 'Unknown'}</em></p>
             `;
         } else {
-            infoDiv.innerHTML = `
+            contentHtml = `
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle"></i> 
                     Application database not found. It will be created when you initialize from a Calibre metadata database.
                 </div>
             `;
         }
+        
+        // Update both divs if they exist
+        if (dashboardInfoDiv) {
+            dashboardInfoDiv.innerHTML = contentHtml;
+        }
+        if (settingsInfoDiv) {
+            settingsInfoDiv.innerHTML = contentHtml;
+        }
+        
     } catch (error) {
         console.error('Error loading database info:', error);
-        infoDiv.innerHTML = `
+        const errorHtml = `
             <div class="alert alert-danger">
                 <i class="fas fa-times-circle"></i> 
                 <strong>Error loading database info:</strong> ${error.message}
             </div>
         `;
+        
+        if (dashboardInfoDiv) {
+            dashboardInfoDiv.innerHTML = errorHtml;
+        }
+        if (settingsInfoDiv) {
+            settingsInfoDiv.innerHTML = errorHtml;
+        }
     }
     
     // Update sync button state based on database status
@@ -2046,7 +2145,7 @@ async function verifyMetadataPath() {
     }
 }
 
-function useFoundPath(path) {
+async function useFoundPath(path) {
     // Set the path in the initialization input field
     const initPathInput = document.getElementById('init-metadata-path');
     const forceReinitCheckbox = document.getElementById('force-reinit');
@@ -2055,32 +2154,59 @@ function useFoundPath(path) {
         initPathInput.value = path;
     }
     
-    // Show confirmation and offer to initialize
-    const message = `Use this database path for initialization?\n\nPath: ${path}\n\nThis will initialize your application database. If the database already exists, check "Force re-initialization" to overwrite it.`;
-    
-    if (confirm(message)) {
-        // Check if we need to force re-initialization based on database status
-        fetch('/api/stats')
-            .then(response => response.json())
-            .then(data => {
-                if (data.exists && forceReinitCheckbox) {
+    try {
+        // First, update the metadata path configuration
+        const updateResponse = await fetch('/api/metadata/update_path', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ path: path })
+        });
+        
+        const updateData = await updateResponse.json();
+        
+        if (!updateData.success) {
+            showToast(`Failed to update metadata path: ${updateData.error}`, 'danger');
+            return;
+        }
+        
+        showToast('Metadata database path updated successfully!', 'success');
+        
+        // Refresh the metadata info display and sync button state
+        await loadMetadataInfo();
+        updateSyncButtonState();
+        
+        // Show confirmation and offer to initialize
+        const message = `Metadata database path has been updated!\n\nPath: ${path}\n\nWould you like to initialize/update your application database now?`;
+        
+        if (confirm(message)) {
+            // Check if we need to force re-initialization based on database status
+            try {
+                const statsResponse = await fetch('/api/stats');
+                const statsData = await statsResponse.json();
+                
+                if (statsData.exists && forceReinitCheckbox) {
                     // Database exists, suggest force re-initialization
-                    if (confirm('Database already exists. Do you want to re-initialize it (this will overwrite existing data)?')) {
+                    if (confirm('Application database already exists. Do you want to re-initialize it (this will overwrite existing data)?')) {
                         forceReinitCheckbox.checked = true;
                         initializeDatabase(path);
                     } else {
-                        showToast(`Database path set to: ${path}. Check "Force re-initialization" to overwrite existing database.`, 'info');
+                        showToast('Database path updated. You can initialize later if needed.', 'info');
                     }
                 } else {
                     initializeDatabase(path);
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 // If we can't check database status, proceed with initialization
                 initializeDatabase(path);
-            });
-    } else {
-        showToast(`Database path set to: ${path}`, 'info');
+            }
+        } else {
+            showToast('Database path updated. You can initialize when ready.', 'info');
+        }
+        
+    } catch (error) {
+        showToast(`Error updating metadata path: ${error.message}`, 'danger');
     }
 }
 

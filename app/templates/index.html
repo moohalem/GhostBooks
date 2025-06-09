@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GhostBook - Library Monitor</title>
+    <title>Calibre Library Monitor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
@@ -57,7 +57,7 @@
                             <h5><i class="fas fa-database"></i> Database Management</h5>
                         </div>
                         <div class="card-body">
-                            <div id="database-info" class="mb-3">
+                            <div id="dashboard-database-info" class="mb-3">
                                 <!-- Database info will be loaded here -->
                             </div>
                             <!-- Author Processing Section -->
@@ -369,13 +369,20 @@
             </h1>
 
             <!-- Database Initialization -->
-            <div class="card mb-4">
+            <div class="card mb-4" id="database-init-card">
                 <div class="card-header">
                     <h5 class="mb-0">
-                        <i class="fas fa-database"></i> Database Initialization
+                        <button class="btn btn-link text-decoration-none p-0 w-100 text-start" type="button" 
+                                data-bs-toggle="collapse" data-bs-target="#database-init-collapse" 
+                                aria-expanded="true" aria-controls="database-init-collapse" 
+                                id="database-init-toggle">
+                            <i class="fas fa-database"></i> Database Initialization
+                            <i class="fas fa-chevron-down float-end" id="database-init-chevron"></i>
+                        </button>
                     </h5>
                 </div>
-                <div class="card-body">
+                <div class="collapse show" id="database-init-collapse">
+                    <div class="card-body">
                     <p class="text-muted">Initialize or re-initialize the application database from a Calibre metadata.db file.</p>
                     
                     <!-- Current Configuration -->
@@ -445,6 +452,7 @@
                     </div>
                     
                     <div id="initialization-status" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
             </div>
 

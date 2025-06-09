@@ -23,6 +23,9 @@ from app.routes.api import api_bp
 # Import database service functions
 from app.services.database import update_author_processing_time
 
+# Import config manager
+from config.config_manager import config_manager
+
 app = Flask(__name__, template_folder="app/templates", static_folder="app/static")
 app.secret_key = "calibre_monitor_secret_key_change_in_production"
 
@@ -35,6 +38,23 @@ CALIBRE_DB_PATH = "metadata.db"
 
 # Configure Flask app
 app.config["DB_PATH"] = DB_PATH
+
+
+# Load persistent configuration
+def load_persistent_config():
+    """Load persistent configuration settings."""
+    # Load saved Calibre database path if available
+    saved_calibre_path = config_manager.get_calibre_db_path()
+    if saved_calibre_path and os.path.exists(saved_calibre_path):
+        app.config["CALIBRE_DB_PATH"] = saved_calibre_path
+        print(f"Loaded persistent Calibre database path: {saved_calibre_path}")
+    else:
+        app.config["CALIBRE_DB_PATH"] = CALIBRE_DB_PATH
+        print(f"Using default Calibre database path: {CALIBRE_DB_PATH}")
+
+
+# Load configuration on startup
+load_persistent_config()
 
 # Global variable to track IRC search status
 irc_search_status = {}
@@ -990,5 +1010,5 @@ if __name__ == "__main__":
             print(result["message"])
 
     print("Starting Calibre Monitor Web Interface...")
-    print("Access the web interface at: http://localhost:5002")
-    app.run(debug=True, host="0.0.0.0", port=5002)
+    print("Access the web interface at: http://localhost:5000")
+    app.run(debug=True, host="0.0.0.0", port=5000)

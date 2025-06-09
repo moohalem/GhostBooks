@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 OpenLibrary service for Calibre Library Monitor
-Handles OpenLibrdef compare_author_books(
-    author: str, local_books: List[str], db_path: Optional[str] = None, verbose: bool = False
-) -> Dict[str, Any]: API interactions with OLID caching
+Handles OpenLibrary API interactions with OLID caching
 """
 
+import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote
 
 import requests
@@ -103,8 +102,100 @@ def get_author_books_from_openlibrary(
     return []
 
 
+def filter_openlibrary_title(title: str) -> str:
+    """
+    Filter OpenLibrary title by removing parentheses content and colon content.
+
+    Args:
+        title: Original title from OpenLibrary
+
+    Returns:
+        Filtered title with parentheses and colon content removed
+    """
+    if not title:
+        return ""
+
+    # Remove content in parentheses (including the parentheses)
+    filtered = re.sub(r"\([^)]*\)", "", title)
+
+    # Remove colon and everything to the right of it
+    if ":" in filtered:
+        filtered = filtered.split(":")[0]
+
+    # Clean up extra whitespace
+    filtered = filtered.strip()
+
+    return filtered
+
+
+def smart_title_match(
+    local_title: str, filtered_openlibrary_titles: Set[str]
+) -> bool:
+    """
+    Check if a local title matches any filtered OpenLibrary title using smart matching.
+
+    The local title is considered a match if it contains all the words from a filtered
+    OpenLibrary title, allowing for more complete local titles to match shorter filtered ones.
+
+    Args:
+        local_title: Title from local Calibre library
+        filtered_openlibrary_titles: Set of filtered OpenLibrary titles
+
+    Returns:
+        True if a match is found, False otherwise
+    """
+    if not local_title:
+        return False
+
+    # Normalize local title for comparison
+    local_normalized = local_title.lower().strip()
+    local_words = set(local_normalized.split())
+
+    for ol_title in filtered_openlibrary_titles:
+        if not ol_title:
+            continue
+
+        ol_normalized = ol_title.lower().strip()
+        ol_words = set(ol_normalized.split())
+
+        # Check if local title contains all words from OpenLibrary title
+        # This allows "Home Coming: Escaping From Alcatraz" to match "Home Coming"
+        if ol_words.issubset(local_words):
+            return True
+
+        # Also check exact match after normalization
+        if local_normalized == ol_normalized:
+            return True
+
+    return False
+
+
+def process_openlibrary_titles(
+    titles: List[str],
+) -> Tuple[List[str], Set[str]]:
+    """
+    Process OpenLibrary titles by filtering and removing duplicates.
+
+    Args:
+        titles: Raw titles from OpenLibrary API
+
+    Returns:
+        Tuple of (original_titles, filtered_unique_titles_set)
+    """
+    filtered_titles = []
+    seen_filtered = set()
+
+    for title in titles:
+        filtered = filter_openlibrary_title(title)
+        if filtered and filtered.lower() not in seen_filtered:
+            filtered_titles.append(filtered)
+            seen_filtered.add(filtered.lower())
+
+    return filtered_titles, seen_filtered
+
+
 def compare_author_books(
-    author: str, local_books: List[str], db_path: str = None, verbose: bool = False
+    author: str, local_books: List[str], db_path: Optional[str] = None, verbose: bool = False
 ) -> Dict[str, Any]:
     """Compare local books with OpenLibrary books for an author."""
     author_key = get_author_key(author, db_path, verbose)
@@ -121,19 +212,25 @@ def compare_author_books(
             "message": f"No books found for author '{author}' on OpenLibrary",
         }
 
-    # Normalize titles for comparison (case-insensitive)
-    local_titles_normalized = {title.lower().strip() for title in local_books}
-    openlibrary_titles_normalized = {
-        title.lower().strip() for title in openlibrary_books
-    }
+    # Process and filter OpenLibrary titles
+    processed_openlibrary_books, filtered_openlibrary_set = process_openlibrary_titles(
+        openlibrary_books
+    )
 
-    # Find missing books
-    missing_normalized = openlibrary_titles_normalized - local_titles_normalized
-    missing_books = [
-        title
-        for title in openlibrary_books
-        if title.lower().strip() in missing_normalized
-    ]
+    # Find missing books using smart matching
+    missing_books = []
+    for title in processed_openlibrary_books:
+        # Check if this OpenLibrary title is NOT found in local collection using smart matching
+        # We need to reverse the logic: check if any local title matches this OpenLibrary title
+        found_match = False
+        for local_book in local_books:
+            # Check if the local book contains all words from the filtered OpenLibrary title
+            if smart_title_match(local_book, {title}):
+                found_match = True
+                break
+        
+        if not found_match:
+            missing_books.append(title)
 
     return {
         "success": True,
