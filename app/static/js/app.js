@@ -1745,8 +1745,19 @@ async function loadMetadataInfo() {
 async function loadDatabaseInfo() {
     const infoDiv = document.getElementById('database-info');
     
+    // Ensure we have the div
+    if (!infoDiv) {
+        console.error('database-info div not found');
+        return;
+    }
+    
     try {
         const response = await fetch('/api/stats');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         
         if (data.exists) {
@@ -1788,6 +1799,7 @@ async function loadDatabaseInfo() {
             `;
         }
     } catch (error) {
+        console.error('Error loading database info:', error);
         infoDiv.innerHTML = `
             <div class="alert alert-danger">
                 <i class="fas fa-times-circle"></i> 
@@ -1795,6 +1807,9 @@ async function loadDatabaseInfo() {
             </div>
         `;
     }
+    
+    // Update sync button state based on database status
+    updateSyncButtonState();
 }
 
 // OLID Cache Management Functions
@@ -1958,7 +1973,7 @@ async function locateMetadataDb() {
 }
 
 async function verifyMetadataPath() {
-    const pathInput = document.getElementById('metadata-path');
+    const pathInput = document.getElementById('init-metadata-path');
     const resultsDiv = document.getElementById('verify-results');
     const button = event.target;
     
@@ -2138,4 +2153,100 @@ async function initializeDatabase(pathOverride = null) {
         `;
         showToast('Database initialization error', 'danger');
     }
+}
+
+async function syncDatabase() {
+    const button = document.getElementById('sync-database-btn');
+    const statusDiv = document.getElementById('sync-status');
+    
+    // Show loading state
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <span>Synchronizing with Calibre metadata... This may take a few minutes.</span>
+            </div>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch('/api/database/sync', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle"></i> 
+                    <strong>Database synchronization completed!</strong><br>
+                    <small>${data.message}</small><br>
+                    <small>New records: ${data.new_records || 'N/A'}</small><br>
+                    <small>Updated records: ${data.updated_records || 'N/A'}</small><br>
+                    <small>Total authors: ${data.total_authors || 'N/A'}</small>
+                </div>
+            `;
+            
+            // Refresh the database info displays
+            await loadDatabaseInfo();
+            await refreshOlidCacheStats();
+            
+            showToast('Database synchronization completed successfully!', 'success');
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle"></i> 
+                    <strong>Synchronization failed:</strong> ${data.message || data.error}
+                </div>
+            `;
+            showToast('Database synchronization failed', 'danger');
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-times-circle"></i> 
+                <strong>Error during synchronization:</strong> ${error.message}
+            </div>
+        `;
+        showToast('Database synchronization error', 'danger');
+    } finally {
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-sync-alt"></i> Sync Database';
+        
+        // Re-check database status to update button state
+        updateSyncButtonState();
+    }
+}
+
+function updateSyncButtonState() {
+    const syncButton = document.getElementById('sync-database-btn');
+    if (!syncButton) return;
+    
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            if (data.exists && data.stats) {
+                // Database is initialized, enable sync button
+                syncButton.disabled = false;
+                syncButton.title = 'Sync with latest Calibre metadata';
+            } else {
+                // Database not initialized, keep button disabled
+                syncButton.disabled = true;
+                syncButton.title = 'Initialize database first before syncing';
+            }
+        })
+        .catch(error => {
+            console.error('Error checking database status:', error);
+            syncButton.disabled = true;
+            syncButton.title = 'Unable to check database status';
+        });
 }

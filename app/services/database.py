@@ -705,3 +705,92 @@ def get_author_olid_stats(db_path: str) -> Dict[str, Any]:
         "authors_with_permanent_olid": authors_with_permanent_olid,
         "authors_without_permanent_olid": authors_without_permanent_olid,
     }
+
+
+def sync_with_calibre_metadata(db_path: str, calibre_db_path: str) -> Dict[str, Any]:
+    """Synchronize the application database with the latest Calibre metadata."""
+    if not os.path.exists(calibre_db_path):
+        return {
+            "success": False,
+            "message": f"Calibre database not found at {calibre_db_path}",
+        }
+
+    if not os.path.exists(db_path):
+        return {
+            "success": False,
+            "message": f"Application database not found at {db_path}. Please initialize first.",
+        }
+
+    try:
+        # Connect to Calibre database
+        calibre_conn = sqlite3.connect(calibre_db_path)
+        calibre_conn.row_factory = sqlite3.Row
+        calibre_cursor = calibre_conn.cursor()
+
+        # Connect to application database
+        app_conn = get_database_connection(db_path)
+        app_cursor = app_conn.cursor()
+
+        # Get existing author-book combinations
+        app_cursor.execute("SELECT author, title FROM author_book")
+        existing_combinations = set((row[0], row[1]) for row in app_cursor.fetchall())
+
+        # Query Calibre database for all author-book combinations
+        calibre_cursor.execute("""
+            SELECT DISTINCT a.name as author, b.title
+            FROM books b
+            JOIN books_authors_link bal ON b.id = bal.book
+            JOIN authors a ON bal.author = a.id
+            WHERE a.name IS NOT NULL AND b.title IS NOT NULL
+            ORDER BY a.name, b.title
+        """)
+
+        new_records = 0
+        updated_records = 0
+
+        for row in calibre_cursor.fetchall():
+            author = row["author"].strip()
+            title = row["title"].strip()
+
+            # Skip empty authors or titles
+            if not author or not title:
+                continue
+
+            combination = (author, title)
+
+            if combination not in existing_combinations:
+                # New record - insert it
+                app_cursor.execute(
+                    """
+                    INSERT INTO author_book (author, title, missing)
+                    VALUES (?, ?, 0)
+                """,
+                    (author, title),
+                )
+                new_records += 1
+
+        # Get final statistics
+        app_cursor.execute("SELECT COUNT(DISTINCT author) FROM author_book")
+        total_authors = app_cursor.fetchone()[0]
+
+        app_cursor.execute("SELECT COUNT(*) FROM author_book")
+        total_books = app_cursor.fetchone()[0]
+
+        # Commit changes
+        app_conn.commit()
+
+        # Close connections
+        calibre_conn.close()
+        app_conn.close()
+
+        return {
+            "success": True,
+            "message": "Database synchronized successfully",
+            "new_records": new_records,
+            "updated_records": updated_records,
+            "total_authors": total_authors,
+            "total_books": total_books,
+        }
+
+    except Exception as e:
+        return {"success": False, "message": f"Error during synchronization: {str(e)}"}

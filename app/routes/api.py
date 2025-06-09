@@ -23,6 +23,7 @@ from app.services.database import (
     get_recently_processed_authors,
     migrate_database_schema,
     search_authors,
+    sync_with_calibre_metadata,
     update_author_processing_time,
     update_missing_books,
     verify_calibre_database,
@@ -628,6 +629,37 @@ def migrate_database_endpoint():
 
         if result["success"]:
             return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/database/sync", methods=["POST"])
+def sync_database_endpoint():
+    """API endpoint to synchronize the database with latest Calibre metadata."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+        calibre_db_path = current_app.config.get("CALIBRE_DB_PATH")
+
+        if not calibre_db_path:
+            return jsonify(
+                {"success": False, "error": "Calibre database path not configured"}
+            ), 400
+
+        # Check if application database exists
+        if not os.path.exists(db_path):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Application database not initialized. Please initialize first.",
+                }
+            ), 400
+
+        result = sync_with_calibre_metadata(db_path, calibre_db_path)
+
+        if result["success"]:
+            return jsonify(result)
         else:
             return jsonify(result), 400
     except Exception as e:
