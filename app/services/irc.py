@@ -9,6 +9,7 @@ import os
 import random
 import re
 import socket
+import ssl  # Add SSL support for TLS connections
 import string
 import threading
 import time
@@ -26,17 +27,29 @@ class IRCSession:
     def __init__(
         self,
         server: str = "irc.irchighway.net",
-        port: int = 6667,
+        port: int = 6697,  # Use TLS port like openbooks
         channel: str = "#ebooks",
+        enable_tls: bool = True,  # Enable TLS by default like openbooks
+        user_agent: str = "Calibre Monitor v1.0",  # Version for CTCP responses
+        search_bot: str = "search",  # Configurable search bot like openbooks
+        connect_timeout: int = 30,  # Connection timeout
+        response_timeout: int = 60,  # Response timeout
     ):
         self.server = server
         self.port = port
         self.channel = channel
+        self.enable_tls = enable_tls
+        self.user_agent = user_agent
+        self.search_bot = search_bot
+        self.connect_timeout = connect_timeout
+        self.response_timeout = response_timeout
         self.socket = None
         self.nickname = self._generate_random_nickname()
+        self.real_name = self.nickname  # Use same as nickname
         self.connected = False
+        self.joined_channel = False
         self.last_command_time = 0
-        self.rate_limit_delay = 10  # Increased to match openbooks (minimum 10 seconds)
+        self.rate_limit_delay = 10  # Match openbooks minimum 10 seconds
         self.download_dir = "downloads"
         self.session_id = f"irc_session_{int(time.time())}"
 
@@ -47,11 +60,22 @@ class IRCSession:
         self._status_lock = threading.RLock()
         self._status = {
             "connected": False,
+            "joined_channel": False,
             "last_activity": None,
             "total_searches": 0,
             "total_downloads": 0,
             "errors": [],
+            "nickname": self.nickname,
+            "server": self.server,
+            "channel": self.channel,
+            "tls_enabled": self.enable_tls,
         }
+
+        # Response handling
+        self._response_buffer = []
+        self._response_lock = threading.Lock()
+        self._listener_thread = None
+        self._running = False
 
     def _generate_random_nickname(self) -> str:
         """Generate a random nickname for IRC connection."""
@@ -89,66 +113,152 @@ class IRCSession:
             return self._status.copy()
 
     def connect(self) -> bool:
-        """Connect to IRC server and join channel."""
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(30)
+        """Connect to IRC server and join channel with TLS support and retry logic."""
+        max_retries = 3
+        retry_count = 0
 
-            print(
-                f"[IRC] Connecting to {self.server}:{self.port} as {self.nickname}..."
-            )
-            self.socket.connect((self.server, self.port))
+        while retry_count < max_retries:
+            try:
+                # Create socket with optional TLS support (like openbooks)
+                if self.enable_tls:
+                    context = ssl.create_default_context()
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.socket = context.wrap_socket(raw_socket)
+                    print(
+                        f"[IRC] Connecting to {self.server}:{self.port} with TLS as {self.nickname}..."
+                    )
+                else:
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    print(
+                        f"[IRC] Connecting to {self.server}:{self.port} as {self.nickname}..."
+                    )
 
-            # Send connection commands
-            self.socket.send(f"NICK {self.nickname}\r\n".encode())
-            self.socket.send(f"USER {self.nickname} 0 * :{self.nickname}\r\n".encode())
+                self.socket.settimeout(self.connect_timeout)
+                self.socket.connect((self.server, self.port))
 
-            # Wait for connection confirmation
-            connected = False
-            retries = 0
-            max_retries = 3
+                # Send connection commands (same as openbooks)
+                self.socket.send(f"NICK {self.nickname}\r\n".encode())
+                self.socket.send(
+                    f"USER {self.nickname} 0 * :{self.real_name}\r\n".encode()
+                )
 
-            while not connected and retries < max_retries:
-                try:
-                    resp = self.socket.recv(2048).decode(errors="ignore")
-                    print(f"[IRC] {resp.strip()}")
+                # Wait for connection confirmation with improved error handling
+                connected = False
+                nick_retries = 0
+                max_nick_retries = 3
 
-                    if "004" in resp or "Welcome" in resp:
-                        connected = True
-                    elif "433" in resp:  # Nickname in use
-                        self.nickname = self._generate_random_nickname()
-                        print(f"[IRC] Trying new nickname: {self.nickname}")
-                        self.socket.send(f"NICK {self.nickname}\r\n".encode())
-                        retries += 1
-                    elif "ERROR" in resp:
-                        raise Exception(f"IRC connection error: {resp}")
+                while not connected and nick_retries < max_nick_retries:
+                    try:
+                        resp = self.socket.recv(2048).decode(errors="ignore")
+                        print(f"[IRC] {resp.strip()}")
 
-                except socket.timeout:
-                    retries += 1
-                    print(f"[IRC] Connection timeout, retry {retries}/{max_retries}")
+                        # Handle different response codes
+                        if "004" in resp or "Welcome" in resp:
+                            connected = True
+                        elif "433" in resp or "Nickname is already in use" in resp:
+                            # Nickname in use - generate new one
+                            old_nick = self.nickname
+                            self.nickname = self._generate_random_nickname()
+                            print(
+                                f"[IRC] Nickname {old_nick} in use, trying: {self.nickname}"
+                            )
+                            self.socket.send(f"NICK {self.nickname}\r\n".encode())
+                            nick_retries += 1
+                        elif "ERROR" in resp or "Closing Link" in resp:
+                            raise Exception(f"IRC connection error: {resp}")
+                        elif "PING" in resp:
+                            # Handle PING during connection
+                            pong_response = resp.replace("PING", "PONG")
+                            self.socket.send(pong_response.encode())
 
-            if not connected:
-                raise Exception("Failed to connect after maximum retries")
+                    except socket.timeout:
+                        nick_retries += 1
+                        if nick_retries >= max_nick_retries:
+                            raise Exception("Connection timeout during registration")
 
-            # Join channel
-            self.socket.send(f"JOIN {self.channel}\r\n".encode())
-            print(f"[IRC] Joined channel {self.channel}")
+                if not connected:
+                    raise Exception("Failed to register nickname after maximum retries")
 
-            self.connected = True
-            self._update_status({"connected": True, "nickname": self.nickname})
+                # Wait before joining (like openbooks does)
+                time.sleep(2)
 
-            # Start background listener for responses
-            self._start_response_listener()
+                # Join channel
+                self.socket.send(f"JOIN {self.channel}\r\n".encode())
 
-            return True
+                # Wait for join confirmation
+                join_confirmed = False
+                join_timeout = 10
+                join_start = time.time()
 
-        except Exception as e:
-            error_msg = f"Failed to connect to IRC: {str(e)}"
-            print(f"[IRC] {error_msg}")
-            self._update_status({"connected": False, "errors": [error_msg]})
-            if self.socket:
-                self.socket.close()
-            return False
+                while not join_confirmed and (time.time() - join_start) < join_timeout:
+                    try:
+                        resp = self.socket.recv(2048).decode(errors="ignore")
+                        if resp:
+                            print(f"[IRC] {resp.strip()}")
+                            if (
+                                f"JOIN {self.channel}" in resp or "366" in resp
+                            ):  # End of NAMES list
+                                join_confirmed = True
+                            elif "PING" in resp:
+                                pong_response = resp.replace("PING", "PONG")
+                                self.socket.send(pong_response.encode())
+                    except socket.timeout:
+                        continue
+
+                if not join_confirmed:
+                    print(
+                        f"[IRC] Warning: Join confirmation not received for {self.channel}"
+                    )
+                else:
+                    print(f"[IRC] Successfully joined channel {self.channel}")
+
+                self.connected = True
+                self.joined_channel = True
+                self._update_status(
+                    {
+                        "connected": True,
+                        "joined_channel": True,
+                        "nickname": self.nickname,
+                        "tls_enabled": self.enable_tls,
+                    }
+                )
+
+                # Start background listener for responses
+                self._start_response_listener()
+
+                print(f"[IRC] Session {self.session_id} connected successfully")
+                return True
+
+            except Exception as e:
+                error_msg = f"Connection attempt {retry_count + 1} failed: {str(e)}"
+                print(f"[IRC] {error_msg}")
+
+                if self.socket:
+                    try:
+                        self.socket.close()
+                    except Exception:
+                        pass
+                    self.socket = None
+
+                retry_count += 1
+                if retry_count < max_retries:
+                    sleep_time = 5 * retry_count  # Progressive backoff
+                    print(f"[IRC] Retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    self._update_status(
+                        {
+                            "connected": False,
+                            "errors": [
+                                f"Failed to connect after {max_retries} attempts: {str(e)}"
+                            ],
+                        }
+                    )
+                    return False
+
+        return False
 
     def _start_response_listener(self) -> None:
         """Start background thread to listen for IRC responses."""
@@ -179,11 +289,15 @@ class IRCSession:
         thread.start()
 
     def _process_irc_response(self, response: str) -> None:
-        """Process IRC responses for search results and DCC offers."""
+        """Process IRC responses for search results, DCC offers, and CTCP requests."""
         lines = response.strip().split("\n")
 
         for line in lines:
             line = line.strip()
+
+            # Handle CTCP VERSION requests (important for IRC Highway allow-listing)
+            if "\x01VERSION\x01" in line:
+                self._handle_version_request(line)
 
             # Check for DCC SEND offers
             if DCCHandler.is_dcc_message(line):
@@ -192,6 +306,27 @@ class IRCSession:
             # Store potential search results
             if self._is_potential_search_result(line):
                 self._store_search_result(line)
+
+    def _handle_version_request(self, line: str) -> None:
+        """Handle CTCP VERSION requests (critical for IRC Highway allow-listing)."""
+        try:
+            # Extract the sender from the line format: ":sender PRIVMSG target :..."
+            if line.startswith(":"):
+                sender = line.split(" ")[0][1:]  # Remove the leading ":"
+                if "!" in sender:
+                    sender = sender.split("!")[0]  # Get nickname only
+
+                # Send CTCP VERSION response (like openbooks)
+                version_response = (
+                    f"NOTICE {sender} :\x01VERSION {self.user_agent}\x01\r\n"
+                )
+                if self.socket:
+                    self.socket.send(version_response.encode())
+                    print(
+                        f"[IRC] Sent CTCP VERSION response to {sender}: {self.user_agent}"
+                    )
+        except Exception as e:
+            print(f"[IRC] Error handling VERSION request: {e}")
 
     def _handle_dcc_offer(self, line: str) -> None:
         """Handle incoming DCC SEND offers."""
@@ -228,8 +363,10 @@ class IRCSession:
 
         self.last_command_time = time.time()
 
-    def search_books(self, author: str, title: Optional[str] = None) -> List[Dict]:
-        """Search for books using @search command with enhanced parsing."""
+    def search_books(
+        self, author: str, title: Optional[str] = None, max_results: int = 50
+    ) -> List[Dict]:
+        """Search for books using @search command with enhanced parsing (following openbooks patterns)."""
         if not self.connected or not self.socket:
             raise Exception("Not connected to IRC")
 
@@ -240,32 +377,60 @@ class IRCSession:
         self._dcc_offers = []
 
         # Format search command (based on openbooks patterns)
+        # Use configurable search bot prefix
         if title:
-            search_query = f"@search {author} {title}"
+            # For specific book searches, include both author and title
+            search_query = f"@{self.search_bot} {author} {title}"
         else:
-            search_query = f"@search {author}"
+            # For author searches, just use author name
+            search_query = f"@{self.search_bot} {author}"
 
-        print(f"[IRC] Searching: {search_query}")
+        print(f"[IRC] Searching with bot '{self.search_bot}': {search_query}")
 
-        # Send search command
-        self.socket.send(f"PRIVMSG {self.channel} :{search_query}\r\n".encode())
+        # Send search command to the channel
+        try:
+            self.socket.send(f"PRIVMSG {self.channel} :{search_query}\r\n".encode())
+        except Exception as e:
+            raise Exception(f"Failed to send search command: {e}")
 
-        # Wait for search results (longer timeout like openbooks)
+        # Wait for search results (following openbooks timeout pattern)
         print("[IRC] Waiting for search results...")
-        time.sleep(15)  # Give more time for results to come in
+        start_time = time.time()
+        timeout = 20  # Increased timeout like openbooks
+
+        while time.time() - start_time < timeout:
+            time.sleep(1)
+            # Check if we've received enough results
+            if (
+                hasattr(self, "_search_results")
+                and len(self._search_results) >= max_results
+            ):
+                print(
+                    f"[IRC] Received {len(self._search_results)} results, stopping collection"
+                )
+                break
 
         # Parse collected results
         if hasattr(self, "_search_results") and self._search_results:
+            print(f"[IRC] Processing {len(self._search_results)} raw results")
+
             books, parse_errors = self.search_parser.parse_search_results(
                 self._search_results
             )
 
-            # Filter results if specific criteria provided
+            # Filter results if specific criteria provided (following openbooks filtering)
             if author or title:
-                filter_term = f"{author} {title}".strip()
+                original_count = len(books)
+                filter_term = f"{author} {title}".strip() if title else author
                 books = self.search_parser.filter_results(
                     books, author_filter=filter_term
                 )
+                print(f"[IRC] Filtered from {original_count} to {len(books)} results")
+
+            # Limit results to max_results
+            if len(books) > max_results:
+                books = books[:max_results]
+                print(f"[IRC] Limited results to {max_results}")
 
             # Convert to dict format for API compatibility
             results = []
@@ -280,22 +445,31 @@ class IRCSession:
                         "download_command": book.full_command,
                         "raw_line": book.raw_line,
                         "parsed_at": datetime.now().isoformat(),
+                        "search_query": search_query,  # Track what was searched
                     }
                 )
 
             # Log parsing errors for debugging
             if parse_errors:
                 print(f"[IRC] {len(parse_errors)} parsing errors occurred")
-                for error in parse_errors[:5]:  # Log first 5 errors
+                for error in parse_errors[:3]:  # Log first 3 errors
                     print(f"[IRC] Parse error: {error.error} - {error.line[:100]}")
 
-            self._update_status({"total_searches": self._status["total_searches"] + 1})
+            self._update_status(
+                {
+                    "total_searches": self._status["total_searches"] + 1,
+                    "last_search_query": search_query,
+                    "last_search_results": len(results),
+                }
+            )
 
-            print(f"[IRC] Search completed. Found {len(results)} books.")
+            print(
+                f"[IRC] Search completed. Found {len(results)} books for '{search_query}'"
+            )
             return results
 
         else:
-            print("[IRC] No search results received")
+            print(f"[IRC] No search results received for '{search_query}'")
             return []
 
     def _is_search_result(self, line: str) -> bool:
@@ -371,10 +545,12 @@ class IRCSession:
 
         # Wait for DCC SEND offer
         dcc_offer = None
-        self.socket.settimeout(60)  # 1 minute timeout for DCC offer
+        self.socket.settimeout(
+            self.response_timeout
+        )  # Use response timeout for DCC offer
 
         start_time = time.time()
-        while time.time() - start_time < 60:
+        while time.time() - start_time < self.response_timeout:
             try:
                 resp = self.socket.recv(4096).decode(errors="ignore")
                 if resp:
@@ -418,9 +594,10 @@ class IRCSession:
             print(f"[IRC] Downloading via DCC to: {file_path}")
 
             # Use DCCHandler to perform the download
-            downloaded_size = DCCHandler.download_file(dcc_offer, file_path)
+            download_result = DCCHandler.download_file(dcc_offer, file_path)
 
-            if downloaded_size > 0:
+            if download_result.get("success", False):
+                downloaded_size = download_result.get("size", 0)
                 print(
                     f"[IRC] DCC download completed: {file_path} ({downloaded_size} bytes)"
                 )
@@ -445,11 +622,16 @@ class IRCSession:
                         "port": dcc_offer.port,
                         "size": dcc_offer.size,
                     },
+                    "download_result": download_result,
                 }
             else:
-                error_msg = "DCC download failed - no data received"
+                error_msg = f"DCC download failed: {download_result.get('error', 'Unknown error')}"
                 print(f"[IRC] {error_msg}")
-                return {"success": False, "error": error_msg}
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "download_result": download_result,
+                }
 
         except Exception as e:
             error_msg = f"DCC download failed: {str(e)}"
@@ -486,8 +668,39 @@ class IRCSession:
                 pass
 
         self.connected = False
-        self._update_status({"connected": False})
+        self.joined_channel = False
+        self._update_status({"connected": False, "joined_channel": False})
         print(f"[IRC] Disconnected session {self.session_id}")
+
+    def is_healthy(self) -> bool:
+        """Check if IRC session is healthy and responsive (openbooks pattern)."""
+        if not self.connected or not self.socket:
+            return False
+
+        try:
+            # Send a simple PING to test connection
+            self.socket.send(f"PING :{self.server}\r\n".encode())
+            return True
+        except Exception:
+            return False
+
+    def get_connection_info(self) -> Dict:
+        """Get detailed connection information (openbooks pattern)."""
+        return {
+            "session_id": self.session_id,
+            "server": self.server,
+            "port": self.port,
+            "channel": self.channel,
+            "nickname": self.nickname,
+            "connected": self.connected,
+            "joined_channel": self.joined_channel,
+            "tls_enabled": self.enable_tls,
+            "search_bot": self.search_bot,
+            "user_agent": self.user_agent,
+            "rate_limit_delay": self.rate_limit_delay,
+            "last_command_time": self.last_command_time,
+            "is_healthy": self.is_healthy(),
+        }
 
 
 # Global session manager
@@ -504,10 +717,15 @@ def create_irc_session() -> str:
 
     # Connect in background
     def connect_session():
-        if session.connect():
-            print(f"[IRC] Session {session.session_id} connected successfully")
-        else:
-            print(f"[IRC] Session {session.session_id} failed to connect")
+        try:
+            if session.connect():
+                print(f"[IRC] Session {session.session_id} connected successfully")
+            else:
+                print(f"[IRC] Session {session.session_id} failed to connect")
+                # Keep session in list for status tracking even if connection failed
+        except Exception as e:
+            print(f"[IRC] Session {session.session_id} connection error: {e}")
+            session._update_status({"errors": [f"Connection failed: {str(e)}"]})
 
     thread = threading.Thread(target=connect_session, daemon=True)
     thread.start()
