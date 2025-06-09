@@ -31,3 +31,10 @@ MANIFEST
 
 
 .pytest_cache/
+
+# Data directory (runtime databases)
+data/
+*.db
+
+.vscode
+

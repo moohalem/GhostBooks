@@ -1,0 +1,25 @@
+[Unit]
+Description=Calibre Library Monitor
+After=network.target
+
+[Service]
+Type=exec
+User=calibre
+Group=calibre
+WorkingDirectory=/opt/calibre-monitor
+Environment=PATH=/opt/calibre-monitor/venv/bin
+ExecStart=/opt/calibre-monitor/venv/bin/python main.py
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=always
+RestartSec=10
+
+# Environment variables
+Environment=GUNICORN_WORKERS=4
+Environment=GUNICORN_BIND=0.0.0.0:5001
+Environment=GUNICORN_LOG_LEVEL=info
+
+[Install]
+WantedBy=multi-user.target

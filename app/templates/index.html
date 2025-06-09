@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calibre Library Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#" onclick="showDashboard()">
+                <i class="fas fa-book"></i> GhostBook
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="#" onclick="showDashboard()">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+                <a class="nav-link" href="#" onclick="showAuthors()">
+                    <i class="fas fa-users"></i> Authors
+                </a>
+                <a class="nav-link" href="#" onclick="showMissing()">
+                    <i class="fas fa-search"></i> Missing Books
+                </a>
+                <a class="nav-link" href="#" onclick="showSettings()">
+                    <i class="fas fa-cog"></i> Settings
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Loading Spinner -->
+        <div id="loading" class="text-center" style="display: none;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading...</p>
+        </div>
+
+        <!-- Dashboard View -->
+        <div id="dashboard-view" class="view-container">
+            <h1 class="mb-4">
+                <i class="fas fa-chart-bar"></i> Dashboard
+                <button class="btn btn-outline-primary btn-sm ms-3" onclick="refreshStats()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </h1>
+            
+            <!-- Database Management -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-database"></i> Database Management</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="database-info" class="mb-3">
+                                <!-- Database info will be loaded here -->
+                            </div>
+                            <!-- Author Processing Section -->
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6 class="mb-3">Database Actions</h6>
+                                    <div class="btn-group-vertical d-grid gap-2" role="group">
+                                        <button class="btn btn-outline-warning" onclick="processAllAuthors()">
+                                            <i class="fas fa-users"></i> Process All Authors (Batch)
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6 class="mb-3">Process Specific Author</h6>
+                                    <div class="input-group mb-3">
+                                        <input type="text" 
+                                               class="form-control" 
+                                               id="specific-author-input" 
+                                               placeholder="Enter author name..."
+                                               autocomplete="off">
+                                        <button class="btn btn-outline-info" 
+                                                type="button" 
+                                                onclick="processSpecificAuthor()"
+                                                id="process-specific-btn">
+                                            <i class="fas fa-user-check"></i> Process Author
+                                        </button>
+                                    </div>
+                                    <div id="author-suggestions" class="list-group" style="display: none; max-height: 200px; overflow-y: auto;">
+                                        <!-- Author suggestions will appear here -->
+                                    </div>
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Start typing to see author suggestions
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Stats Cards -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="fas fa-users"></i> Total Authors
+                            </h5>
+                            <h2 id="total-authors">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="fas fa-book"></i> Total Books
+                            </h5>
+                            <h2 id="total-books">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="fas fa-exclamation-triangle"></i> Missing Books
+                            </h5>
+                            <h2 data-stat="missing-books">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-danger text-white">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <i class="fas fa-user-times"></i> Authors with Missing
+                            </h5>
+                            <h2 data-stat="authors-with-missing">-</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Authors -->
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-users"></i> Recent Authors</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Author</th>
+                                    <th>Total Books</th>
+                                    <th>Missing Books</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-authors-list">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Authors View -->
+        <div id="authors-view" class="view-container" style="display: none;">
+            <div class="row">
+                <!-- Main Content - Author List -->
+                <div class="col-lg-8">
+                    <h1 class="mb-4">
+                        <i class="fas fa-users"></i> Authors
+                        <button class="btn btn-outline-primary btn-sm ms-3" onclick="loadAuthors()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </h1>
+                    
+                    <!-- Search Authors -->
+                    <div class="mb-3">
+                        <input type="text" id="author-search" class="form-control" 
+                               placeholder="Search authors..." onkeyup="filterAuthors()">
+                        <div id="search-results-info" class="form-text text-muted mt-1" style="display: none;">
+                            <!-- Search results info will appear here -->
+                        </div>
+                    </div>
+
+                    <!-- Authors List with Dropdown -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="fas fa-list"></i> Author Library</h5>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="authors-accordion">
+                                <!-- Authors with expandable book lists will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Sidebar - Actions -->
+                <div class="col-lg-4">
+                    <div class="sticky-top" style="top: 20px;">
+                        <!-- Update Controls -->
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-sync-alt"></i> Update Options</h6>
+                            </div>
+                            <div class="card-body">
+                                <div id="selected-author-info" style="display: none;">
+                                    <p class="text-muted mb-3">Selected Author:</p>
+                                    <h6 id="selected-author-name" class="text-primary"></h6>
+                                    <hr>
+                                    <button class="btn btn-primary btn-sm w-100 mb-2" onclick="updateAuthorFromAPI()">
+                                        <i class="fas fa-cloud-download-alt"></i> Update from OpenLibrary API
+                                    </button>
+                                    <button class="btn btn-warning btn-sm w-100 mb-2" onclick="searchMissingOnIRC()">
+                                        <i class="fas fa-search"></i> Search Missing on IRC
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearAuthorSelection()">
+                                        <i class="fas fa-times"></i> Clear Selection
+                                    </button>
+                                </div>
+                                <div id="no-author-selected">
+                                    <p class="text-muted text-center">
+                                        <i class="fas fa-hand-pointer"></i><br>
+                                        Click on an author to select and see update options
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Update Status -->
+                        <div class="card" id="update-status-card" style="display: none;">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-info-circle"></i> Update Status</h6>
+                            </div>
+                            <div class="card-body">
+                                <div id="update-progress">
+                                    <!-- Update progress will be shown here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Legend -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-info"></i> Legend</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-2">
+                                    <i class="fas fa-check-circle text-success"></i> Book exists in both local and API
+                                </div>
+                                <div class="mb-2">
+                                    <i class="fas fa-exclamation-triangle text-danger"></i> <span class="text-danger">Missing from local library</span>
+                                </div>
+                                <div class="mb-2">
+                                    <i class="fas fa-question-circle text-warning"></i> <span class="text-warning">Missing from API</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Author Detail View -->
+        <div id="author-detail-view" class="view-container" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1>
+                    <i class="fas fa-user"></i> <span id="author-name"></span>
+                </h1>
+                <div>
+                    <button class="btn btn-outline-secondary" onclick="showAuthors()">
+                        <i class="fas fa-arrow-left"></i> Back to Authors
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="refreshAuthor()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-warning" onclick="searchAuthorIRC(window.currentAuthor)" id="irc-search-btn">
+                        <i class="fas fa-search"></i> Search on IRC
+                    </button>
+                </div>
+            </div>
+
+            <!-- Author Stats -->
+            <div class="stats-container">
+                <!-- Stats will be populated by JavaScript -->
+            </div>
+
+            <!-- Books Tabs -->
+            <ul class="nav nav-tabs" id="books-tabs">
+                <li class="nav-item">
+                    <a class="nav-link active" data-bs-toggle="tab" href="#all-books-tab">
+                        All Books (<span id="all-books-count">0</span>)
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="tab" href="#missing-books-tab">
+                        Missing Books (<span id="missing-books-count">0</span>)
+                    </a>
+                </li>
+            </ul>
+
+            <div class="tab-content mt-3">
+                <div class="tab-pane fade show active" id="all-books-tab">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="all-books-list">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="missing-books-tab">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="missing-books-list">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Missing Books View -->
+        <div id="missing-view" class="view-container" style="display: none;">
+            <h1 class="mb-4">
+                <i class="fas fa-search"></i> Missing Books
+                <button class="btn btn-outline-primary btn-sm ms-3" onclick="loadMissingBooks()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </h1>
+
+            <!-- Search Missing Books -->
+            <div class="mb-3">
+                <input type="text" id="missing-search" class="form-control" 
+                       placeholder="Search missing books..." onkeyup="filterMissingBooks()">
+            </div>
+
+            <!-- Missing Books by Author -->
+            <div id="missing-books-container">
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="settings-view" class="view-container" style="display: none;">
+            <h1 class="mb-4">
+                <i class="fas fa-cog"></i> Settings
+            </h1>
+
+            <!-- Metadata Database Configuration -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-database"></i> Calibre Metadata Database
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6>Current Configuration</h6>
+                            <div id="metadata-status" class="mb-3">
+                                <div class="d-flex align-items-center">
+                                    <div class="spinner-border spinner-border-sm me-2" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span>Checking metadata database...</span>
+                                </div>
+                            </div>
+                            
+                            <h6>Auto-locate Database</h6>
+                            <p class="text-muted">Search for Calibre metadata.db in common locations</p>
+                            <button class="btn btn-primary" onclick="locateMetadataDb()">
+                                <i class="fas fa-search"></i> Locate metadata.db
+                            </button>
+                            
+                            <div id="locate-results" class="mt-3" style="display: none;"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Manual Path</h6>
+                            <div class="mb-3">
+                                <input type="text" id="metadata-path" class="form-control" 
+                                       placeholder="/path/to/metadata.db">
+                            </div>
+                            <button class="btn btn-secondary" onclick="verifyMetadataPath()">
+                                <i class="fas fa-check"></i> Verify Path
+                            </button>
+                            
+                            <div id="verify-results" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Database Initialization -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-database"></i> Database Initialization
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Initialize or re-initialize the application database from a Calibre metadata.db file.</p>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="init-metadata-path" class="form-label">Calibre metadata.db Path</label>
+                                <input type="text" id="init-metadata-path" class="form-control" 
+                                       placeholder="/path/to/metadata.db">
+                                <div class="form-text">Leave empty to auto-detect from common locations</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label class="form-label">&nbsp;</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="force-reinit">
+                                    <label class="form-check-label" for="force-reinit">
+                                        Force re-initialization
+                                    </label>
+                                </div>
+                                <div class="form-text">Overwrite existing database</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">&nbsp;</label>
+                            <div>
+                                <button class="btn btn-success" onclick="initializeDatabase()">
+                                    <i class="fas fa-play"></i> Initialize Database
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="initialization-status" class="mt-3" style="display: none;"></div>
+                </div>
+            </div>
+
+            <!-- Database Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-info-circle"></i> Database Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="database-info">
+                        <div class="d-flex align-items-center">
+                            <div class="spinner-border spinner-border-sm me-2" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span>Loading database information...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Directory -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-folder"></i> Data Directory
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Application database is stored in: <code>data/authors_books.db</code></p>
+                    <p class="small">This database contains the processed book and author information from Calibre.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="notification-toast" class="toast" role="alert">
+            <div class="toast-header">
+                <strong class="me-auto">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toast-message">
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
