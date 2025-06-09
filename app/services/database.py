@@ -219,13 +219,34 @@ def initialize_database(
         new_conn = sqlite3.connect(db_path)
         new_cursor = new_conn.cursor()
 
-        # Create table with an additional 'missing' column
+        # Create table with additional 'missing' and 'olid' columns
         new_cursor.execute("""
         CREATE TABLE IF NOT EXISTS author_book (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             author TEXT NOT NULL,
             title TEXT NOT NULL,
-            missing BOOLEAN NOT NULL DEFAULT 0
+            missing BOOLEAN NOT NULL DEFAULT 0,
+            olid TEXT,
+            olid_last_updated TIMESTAMP
+        )
+        """)
+
+        # Create the OLID caching table (for backward compatibility and detailed tracking)
+        new_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS author_olid (
+            author TEXT PRIMARY KEY,
+            olid TEXT NOT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        # Create the author processing table
+        new_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS author_processing (
+            author TEXT PRIMARY KEY,
+            last_processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            processed_count INTEGER DEFAULT 0
         )
         """)
 
@@ -426,3 +447,261 @@ def get_recently_processed_authors(
 
     conn.close()
     return authors
+
+
+def ensure_author_olid_table(db_path: str) -> None:
+    """Ensure the author_olid table exists for caching OpenLibrary IDs."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS author_olid (
+            author TEXT PRIMARY KEY,
+            olid TEXT NOT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def get_author_olid(db_path: str, author: str) -> Optional[str]:
+    """Get cached OLID for an author."""
+    ensure_author_olid_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT olid FROM author_olid WHERE author = ?", (author,))
+
+    result = cursor.fetchone()
+    conn.close()
+
+    return result[0] if result else None
+
+
+def store_author_olid(db_path: str, author: str, olid: str) -> None:
+    """Store or update OLID for an author."""
+    ensure_author_olid_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO author_olid (author, olid, last_updated)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+    """,
+        (author, olid),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def migrate_database_schema(db_path: str) -> Dict[str, Any]:
+    """Migrate database schema to add OLID columns if they don't exist."""
+    try:
+        conn = get_database_connection(db_path)
+        cursor = conn.cursor()
+
+        # Check if OLID columns exist in author_book table
+        cursor.execute("PRAGMA table_info(author_book)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        migrations_applied = []
+
+        # Add OLID column if it doesn't exist
+        if "olid" not in columns:
+            cursor.execute("ALTER TABLE author_book ADD COLUMN olid TEXT")
+            migrations_applied.append("Added 'olid' column to author_book table")
+
+        # Add OLID last updated column if it doesn't exist
+        if "olid_last_updated" not in columns:
+            cursor.execute(
+                "ALTER TABLE author_book ADD COLUMN olid_last_updated TIMESTAMP"
+            )
+            migrations_applied.append(
+                "Added 'olid_last_updated' column to author_book table"
+            )
+
+        # Ensure the author_olid table exists (for detailed tracking)
+        ensure_author_olid_table(db_path)
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "migrations_applied": migrations_applied,
+            "message": f"Applied {len(migrations_applied)} database migrations",
+        }
+
+    except Exception as e:
+        return {"success": False, "message": f"Database migration failed: {str(e)}"}
+
+
+def store_author_olid_permanent(db_path: str, author: str, olid: Optional[str]) -> None:
+    """Store OLID permanently in both the main author_book table and the tracking table."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    try:
+        # Update all records for this author in the main author_book table
+        cursor.execute(
+            """
+            UPDATE author_book 
+            SET olid = ?, olid_last_updated = CURRENT_TIMESTAMP 
+            WHERE author = ?
+        """,
+            (olid, author),
+        )
+
+        # Also store in the tracking table for detailed statistics
+        if olid:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO author_olid (author, olid, last_updated)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """,
+                (author, olid),
+            )
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_author_olid_from_books(db_path: str, author: str) -> Optional[str]:
+    """Get OLID for an author from the main author_book table."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT olid FROM author_book WHERE author = ? AND olid IS NOT NULL LIMIT 1",
+        (author,),
+    )
+
+    result = cursor.fetchone()
+    conn.close()
+
+    return result[0] if result else None
+
+
+def get_authors_with_olid(db_path: str) -> List[Dict[str, Any]]:
+    """Get all authors that have OLID stored."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT DISTINCT author, olid, olid_last_updated,
+               COUNT(*) as book_count
+        FROM author_book 
+        WHERE olid IS NOT NULL 
+        GROUP BY author, olid, olid_last_updated
+        ORDER BY olid_last_updated DESC
+    """)
+
+    authors = []
+    for row in cursor.fetchall():
+        authors.append(
+            {
+                "author": row[0],
+                "olid": row[1],
+                "last_updated": row[2],
+                "book_count": row[3],
+            }
+        )
+
+    conn.close()
+    return authors
+
+
+def get_authors_without_olid(db_path: str) -> List[Dict[str, Any]]:
+    """Get all authors that don't have OLID stored."""
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT DISTINCT author, COUNT(*) as book_count
+        FROM author_book 
+        WHERE olid IS NULL 
+        GROUP BY author
+        ORDER BY book_count DESC
+    """)
+
+    authors = []
+    for row in cursor.fetchall():
+        authors.append({"author": row[0], "book_count": row[1]})
+
+    conn.close()
+    return authors
+
+
+def clear_author_olid_cache(db_path: str) -> int:
+    """Clear all cached OLIDs and return count of cleared entries."""
+    ensure_author_olid_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM author_olid")
+    count = cursor.fetchone()[0]
+
+    cursor.execute("DELETE FROM author_olid")
+    conn.commit()
+    conn.close()
+
+    return count
+
+
+def get_author_olid_stats(db_path: str) -> Dict[str, Any]:
+    """Get statistics about OLID storage and cache performance."""
+    ensure_author_olid_table(db_path)
+
+    conn = get_database_connection(db_path)
+    cursor = conn.cursor()
+
+    # Get total entries in tracking table
+    cursor.execute("SELECT COUNT(*) FROM author_olid")
+    total_entries = cursor.fetchone()[0]
+
+    # Get entries with valid OLIDs (not null/empty)
+    cursor.execute(
+        "SELECT COUNT(*) FROM author_olid WHERE olid IS NOT NULL AND olid != ''"
+    )
+    entries_with_olid = cursor.fetchone()[0]
+
+    # Get entries without valid OLIDs
+    entries_without_olid = total_entries - entries_with_olid
+
+    # Calculate cache hit rate
+    cache_hit_rate = round(
+        (entries_with_olid / total_entries * 100) if total_entries > 0 else 0, 1
+    )
+
+    # Get additional stats from main author_book table
+    cursor.execute(
+        "SELECT COUNT(DISTINCT author) FROM author_book WHERE olid IS NOT NULL"
+    )
+    authors_with_permanent_olid = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(DISTINCT author) FROM author_book WHERE olid IS NULL")
+    authors_without_permanent_olid = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "total_entries": total_entries,
+        "entries_with_olid": entries_with_olid,
+        "entries_without_olid": entries_without_olid,
+        "cache_hit_rate": cache_hit_rate,
+        "authors_with_permanent_olid": authors_with_permanent_olid,
+        "authors_without_permanent_olid": authors_without_permanent_olid,
+    }

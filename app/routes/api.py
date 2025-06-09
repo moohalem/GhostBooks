@@ -9,13 +9,19 @@ import os
 from flask import Blueprint, current_app, jsonify, request
 
 from app.services.database import (
+    clear_author_olid_cache,
+    ensure_author_olid_table,
     find_calibre_metadata_db,
     get_author_books,
+    get_author_olid_stats,
+    get_authors_with_olid,
+    get_authors_without_olid,
     get_database_connection,
     get_database_stats,
     get_metadata_db_info,
     get_missing_books,
     get_recently_processed_authors,
+    migrate_database_schema,
     search_authors,
     update_author_processing_time,
     update_missing_books,
@@ -183,8 +189,13 @@ def compare_author(author_name):
         local_books = get_author_books(current_app.config["DB_PATH"], author_name)
         local_titles = [book["title"] for book in local_books]
 
-        # Compare with OpenLibrary
-        result = compare_author_books(author_name, local_titles, verbose=False)
+        # Compare with OpenLibrary (with OLID caching)
+        result = compare_author_books(
+            author_name,
+            local_titles,
+            verbose=False,
+            db_path=current_app.config["DB_PATH"],
+        )
 
         if result["success"]:
             # Update missing books in database
@@ -345,6 +356,13 @@ def initialize_database_endpoint():
             current_app.config["DB_PATH"], calibre_db_path, force_reinit
         )
 
+        # Ensure OLID table is created and migrate schema after database initialization
+        if result["success"]:
+            ensure_author_olid_table(current_app.config["DB_PATH"])
+            migration_result = migrate_database_schema(current_app.config["DB_PATH"])
+            if migration_result["migrations_applied"]:
+                result["migrations"] = migration_result["migrations_applied"]
+
         if result["success"]:
             return jsonify(result), 200
         else:
@@ -499,3 +517,118 @@ def get_recently_processed_authors_endpoint():
             return jsonify([])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/cache/olid/stats")
+def get_olid_cache_stats():
+    """API endpoint to get OLID cache statistics."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+
+        # Ensure the OLID table exists
+        ensure_author_olid_table(db_path)
+
+        stats = get_author_olid_stats(db_path)
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/cache/olid/clear", methods=["POST"])
+def clear_olid_cache():
+    """API endpoint to clear the OLID cache."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+
+        # Clear the cache
+        cleared_count = clear_author_olid_cache(db_path)
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Cleared {cleared_count} cached OLID entries",
+                "cleared_count": cleared_count,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/cache/olid/status")
+def get_olid_cache_status():
+    """API endpoint to get OLID cache status and recent entries."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+
+        # Ensure the OLID table exists
+        ensure_author_olid_table(db_path)
+
+        # Get basic stats
+        stats = get_author_olid_stats(db_path)
+
+        # Get recent cache entries
+        conn = get_database_connection(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT author, olid, last_updated, created_at
+            FROM author_olid
+            ORDER BY last_updated DESC
+            LIMIT 20
+        """)
+
+        recent_entries = []
+        for row in cursor.fetchall():
+            recent_entries.append(
+                {
+                    "author_name": row[0],
+                    "olid": row[1],
+                    "last_updated": row[2],
+                    "created_at": row[3],
+                }
+            )
+
+        conn.close()
+
+        return jsonify(
+            {"success": True, "stats": stats, "recent_entries": recent_entries}
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/authors/with-olid")
+def get_authors_with_olid_endpoint():
+    """API endpoint to get authors that have OLID stored."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+        authors = get_authors_with_olid(db_path)
+        return jsonify({"success": True, "authors": authors, "count": len(authors)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/authors/without-olid")
+def get_authors_without_olid_endpoint():
+    """API endpoint to get authors that don't have OLID stored."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+        authors = get_authors_without_olid(db_path)
+        return jsonify({"success": True, "authors": authors, "count": len(authors)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/database/migrate", methods=["POST"])
+def migrate_database_endpoint():
+    """API endpoint to migrate database schema."""
+    try:
+        db_path = current_app.config["DB_PATH"]
+        result = migrate_database_schema(db_path)
+
+        if result["success"]:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500

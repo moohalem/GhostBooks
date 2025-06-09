@@ -550,8 +550,7 @@ async function loadAuthors(page = 1, search = '') {
                             type="button" 
                             data-bs-toggle="collapse" 
                             data-bs-target="#collapse${(page-1)*50 + index}" 
-                            onclick="selectAuthorFromAccordion('${escapeHtml(author.author)}')"
-                            style="background: none; border: none;">
+                            onclick="selectAuthorFromAccordion('${escapeHtml(author.author)}')">
                         <div class="d-flex align-items-center flex-grow-1">
                             <i class="fas fa-user me-2"></i>
                             <strong>${escapeHtml(author.author)}</strong>
@@ -1700,6 +1699,7 @@ function showSettings() {
     document.getElementById('settings-view').style.display = 'block';
     loadMetadataInfo();
     loadDatabaseInfo();
+    refreshOlidCacheStats();
 }
 
 async function loadMetadataInfo() {
@@ -1794,6 +1794,110 @@ async function loadDatabaseInfo() {
                 <strong>Error loading database info:</strong> ${error.message}
             </div>
         `;
+    }
+}
+
+// OLID Cache Management Functions
+async function refreshOlidCacheStats() {
+    const statsDiv = document.getElementById('olid-cache-stats');
+    const recentDiv = document.getElementById('olid-cache-recent');
+    
+    try {
+        statsDiv.innerHTML = `
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <span>Loading cache statistics...</span>
+            </div>
+        `;
+        
+        const response = await fetch('/api/cache/olid/status');
+        const data = await response.json();
+        
+        if (data.success) {
+            const stats = data.stats;
+            statsDiv.innerHTML = `
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <h6 class="text-primary">${stats.total_entries}</h6>
+                            <small class="text-muted">Cached Authors</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <h6 class="text-info">${stats.entries_with_olid}</h6>
+                            <small class="text-muted">With OLID</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <h6 class="text-warning">${stats.entries_without_olid}</h6>
+                            <small class="text-muted">Without OLID</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <h6 class="text-success">${stats.cache_hit_rate}%</h6>
+                            <small class="text-muted">Cache Hit Rate</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Show recent entries if we have any
+            if (data.recent_entries && data.recent_entries.length > 0) {
+                const recentTableBody = document.getElementById('recent-olid-entries');
+                recentTableBody.innerHTML = data.recent_entries.map(entry => `
+                    <tr>
+                        <td>${escapeHtml(entry.author_name)}</td>
+                        <td><code>${entry.olid || 'N/A'}</code></td>
+                        <td>${new Date(entry.last_updated).toLocaleString()}</td>
+                    </tr>
+                `).join('');
+                recentDiv.style.display = 'block';
+            } else {
+                recentDiv.style.display = 'none';
+            }
+            
+        } else {
+            throw new Error(data.error || 'Failed to load cache statistics');
+        }
+    } catch (error) {
+        statsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-times-circle"></i> 
+                <strong>Error loading cache stats:</strong> ${error.message}
+            </div>
+        `;
+        recentDiv.style.display = 'none';
+    }
+}
+
+async function clearOlidCache() {
+    if (!confirm('Are you sure you want to clear all cached OpenLibrary IDs? This will require fresh API calls for all authors.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/cache/olid/clear', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Successfully cleared ${data.cleared_count} cached OLID entries`, 'success');
+            await refreshOlidCacheStats(); // Refresh the display
+        } else {
+            throw new Error(data.error || 'Failed to clear cache');
+        }
+    } catch (error) {
+        showToast(`Error clearing cache: ${error.message}`, 'danger');
     }
 }
 
@@ -2035,33 +2139,3 @@ async function initializeDatabase(pathOverride = null) {
         showToast('Database initialization error', 'danger');
     }
 }
-
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize tooltips
-    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
-    
-    // Initialize popovers
-    const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
-    popoverTriggerList.map(function (popoverTriggerEl) {
-        return new bootstrap.Popover(popoverTriggerEl);
-    });
-    
-    // Initialize author autocomplete functionality
-    setupAuthorAutocomplete();
-    
-    // Load initial view (dashboard)
-    showDashboard();
-});
-
-// Export functions for global use
-window.CalibreMonitor = {
-    showToast,
-    apiRequest,
-    ircSearchManager,
-    autoRefreshManager,
-    initializeTableSearch
-};

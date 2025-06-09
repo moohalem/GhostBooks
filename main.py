@@ -77,7 +77,11 @@ def get_gunicorn_options():
 
 def initialize_application():
     """Initialize the application and database if needed."""
-    from app.services.database import initialize_database
+    from app.services.database import (
+        ensure_author_olid_table,
+        initialize_database,
+        migrate_database_schema,
+    )
 
     print("🚀 Starting Calibre Library Monitor...")
 
@@ -97,6 +101,18 @@ def initialize_application():
             print("⚠️  The application will start but some features may not work.")
     else:
         print("✅ Database found and ready")
+        # Ensure OLID table exists and migrate schema for existing databases
+        try:
+            ensure_author_olid_table(db_path)
+            migration_result = migrate_database_schema(db_path)
+            if migration_result["success"] and migration_result["migrations_applied"]:
+                print(
+                    f"✅ Applied database migrations: {', '.join(migration_result['migrations_applied'])}"
+                )
+            else:
+                print("✅ Database schema is up to date")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not ensure OLID table or migrate schema: {e}")
 
 
 def main():

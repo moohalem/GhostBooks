@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 OpenLibrary service for Calibre Library Monitor
-Handles OpenLibrary API interactions
+Handles OpenLibrdef compare_author_books(
+    author: str, local_books: List[str], db_path: Optional[str] = None, verbose: bool = False
+) -> Dict[str, Any]: API interactions with OLID caching
 """
 
 import time
@@ -10,9 +12,21 @@ from urllib.parse import quote
 
 import requests
 
+from .database import get_author_olid_from_books, store_author_olid_permanent
 
-def get_author_key(author: str, verbose: bool = False) -> Optional[str]:
-    """Get the OpenLibrary author key for a given author name."""
+
+def get_author_key(
+    author: str, db_path: Optional[str] = None, verbose: bool = False
+) -> Optional[str]:
+    """Get the OpenLibrary author key for a given author name, with permanent storage."""
+    # Check permanent storage first if db_path is provided
+    if db_path:
+        cached_olid = get_author_olid_from_books(db_path, author)
+        if cached_olid:
+            if verbose:
+                print(f"[VERBOSE] Using stored OLID for {author}: {cached_olid}")
+            return cached_olid
+
     url = f"https://openlibrary.org/search/authors.json?q={quote(author)}"
     if verbose:
         print(f"[VERBOSE] Querying author key for: {author}")
@@ -28,9 +42,27 @@ def get_author_key(author: str, verbose: bool = False) -> Optional[str]:
                     print(f"[VERBOSE] Found author candidate: {doc.get('name', '')}")
                 # Match author name exactly (case-insensitive)
                 if doc.get("name", "").strip().lower() == author.strip().lower():
+                    olid = doc.get("key")
                     if verbose:
-                        print(f"[VERBOSE] Author match found: {doc.get('key')}")
-                    return doc.get("key")
+                        print(f"[VERBOSE] Author match found: {olid}")
+
+                    # Store the OLID permanently if db_path is provided
+                    if db_path:
+                        store_author_olid_permanent(db_path, author, olid)
+                        if verbose:
+                            print(
+                                f"[VERBOSE] Permanently stored OLID for {author}: {olid}"
+                            )
+
+                    return olid
+
+            # If no exact match found, store that we tried (with None)
+            if db_path:
+                store_author_olid_permanent(db_path, author, None)
+                if verbose:
+                    print(
+                        f"[VERBOSE] No OLID found for {author}, stored as None to avoid future API calls"
+                    )
         else:
             print(f"Author API error for {author}: {response.status_code}")
     except Exception as e:
@@ -72,10 +104,10 @@ def get_author_books_from_openlibrary(
 
 
 def compare_author_books(
-    author: str, local_books: List[str], verbose: bool = False
+    author: str, local_books: List[str], db_path: str = None, verbose: bool = False
 ) -> Dict[str, Any]:
     """Compare local books with OpenLibrary books for an author."""
-    author_key = get_author_key(author, verbose)
+    author_key = get_author_key(author, db_path, verbose)
     if not author_key:
         return {
             "success": False,
@@ -106,6 +138,7 @@ def compare_author_books(
     return {
         "success": True,
         "author": author,
+        "author_key": author_key,
         "local_count": len(local_books),
         "openlibrary_count": len(openlibrary_books),
         "missing_count": len(missing_books),

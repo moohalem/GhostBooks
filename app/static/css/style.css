@@ -477,35 +477,118 @@ input[type="text"]:focus {
 
 /* Enhanced accordion styling */
 .accordion-button {
-    color: #212529;
-    background-color: #fff;
+    color: #212529 !important;
+    background-color: #fff !important;
+    border: 1px solid #dee2e6 !important;
+    font-weight: 500;
 }
 
 .accordion-button:not(.collapsed) {
-    color: #0d6efd;
-    background-color: #e7f1ff;
+    color: #0d6efd !important;
+    background-color: #e7f1ff !important;
+    border-color: #b6d7ff !important;
 }
 
 .accordion-button:focus {
-    border-color: #86b7fe;
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    border-color: #86b7fe !important;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25) !important;
 }
 
-/* Improved modal contrast */
-.modal-content {
-    background-color: #fff;
-    color: #212529;
+.accordion-button:hover {
+    background-color: #f8f9fa !important;
+    color: #212529 !important;
 }
 
-.modal-header {
-    border-bottom: 1px solid #dee2e6;
-    background-color: #f8f9fa;
-    color: #212529;
+/* Specific styling for author library list */
+#authors-accordion .accordion-button {
+    color: #212529 !important;
+    background-color: #fff !important;
+    border: 1px solid #dee2e6 !important;
+    font-weight: 500;
+    text-decoration: none;
 }
 
-.modal-footer {
-    border-top: 1px solid #dee2e6;
-    background-color: #f8f9fa;
+#authors-accordion .accordion-button strong {
+    color: #212529 !important;
+    font-weight: 600;
+}
+
+#authors-accordion .accordion-button:hover {
+    background-color: #f8f9fa !important;
+    color: #212529 !important;
+    border-color: #adb5bd !important;
+}
+
+#authors-accordion .accordion-button:hover strong {
+    color: #212529 !important;
+}
+
+#authors-accordion .accordion-button:not(.collapsed) {
+    color: #0d6efd !important;
+    background-color: #e7f1ff !important;
+    border-color: #b6d7ff !important;
+}
+
+#authors-accordion .accordion-button:not(.collapsed) strong {
+    color: #0d6efd !important;
+}
+
+/* Enhanced selection highlighting */
+#authors-accordion .accordion-button.border-primary {
+    border-color: #0d6efd !important;
+    background-color: #e7f1ff !important;
+}
+
+#authors-accordion .accordion-button.border-primary strong {
+    color: #0d6efd !important;
+}
+
+#authors-accordion .accordion-button.bg-light {
+    background-color: #f8f9fa !important;
+}
+
+/* Enhanced badge contrast within accordion buttons */
+#authors-accordion .accordion-button .badge {
+    font-weight: 600;
+    font-size: 0.75em;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+#authors-accordion .accordion-button .badge.bg-primary {
+    background-color: #0d6efd !important;
+    color: #fff !important;
+    border-color: #0a58ca;
+}
+
+#authors-accordion .accordion-button .badge.bg-warning {
+    background-color: #fd7e14 !important;
+    color: #fff !important;
+    border-color: #fd7e14;
+}
+
+#authors-accordion .accordion-button .badge.bg-success {
+    background-color: #198754 !important;
+    color: #fff !important;
+    border-color: #146c43;
+}
+
+/* Enhanced contrast for author icons */
+#authors-accordion .accordion-button .fas.fa-user {
+    color: #6c757d !important;
+}
+
+#authors-accordion .accordion-button:hover .fas.fa-user {
+    color: #495057 !important;
+}
+
+#authors-accordion .accordion-button:not(.collapsed) .fas.fa-user {
+    color: #0d6efd !important;
+}
+
+/* Additional font weight for better readability */
+#authors-accordion .accordion-button .d-flex.align-items-center strong {
+    font-weight: 600 !important;
+    letter-spacing: 0.01em;
 }
 
 /* Additional contrast improvements for UI components */
@@ -610,5 +693,39 @@ input[type="text"]:focus {
         background-color: #333;
         color: #e0e0e0;
         border-color: #495057;
+    }
+}
+
+/* Responsive design improvements for author list */
+@media (max-width: 768px) {
+    #authors-accordion .accordion-button {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+    
+    #authors-accordion .accordion-button strong {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    
+    #authors-accordion .accordion-button .badge {
+        font-size: 0.7em;
+        padding: 0.25em 0.5em;
+    }
+    
+    #authors-accordion .accordion-button .d-flex.align-items-center {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+}
+
+@media (max-width: 576px) {
+    #authors-accordion .accordion-button {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+    }
+    
+    #authors-accordion .accordion-button .badge {
+        font-size: 0.65em;
     }
 }
