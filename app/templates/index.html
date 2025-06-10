@@ -641,8 +641,8 @@
                         <i class="fas fa-cloud-download-alt"></i> Populating Missing Books Database
                     </h5>
                     <div class="d-flex">
-                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="minimize-button" onclick="minimizeProgressModal()" title="Minimize">
-                            <i class="fas fa-minus"></i>
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="close-modal-button" onclick="closeProgressModal()" title="Close">
+                            <i class="fas fa-times"></i>
                         </button>
                     </div>
                 </div>
@@ -710,10 +710,16 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-danger" id="cancel-button" onclick="cancelPopulation()">
-                        <i class="fas fa-stop"></i> Cancel
+                    <button type="button" class="btn btn-warning" id="pause-button" onclick="pausePopulation()" style="display: none;">
+                        <i class="fas fa-pause"></i> Pause
                     </button>
-                    <button type="button" class="btn btn-secondary" id="close-button" onclick="closeProgressModal()" style="display: none;">
+                    <button type="button" class="btn btn-success" id="resume-button" onclick="resumePopulation()" style="display: none;">
+                        <i class="fas fa-play"></i> Resume
+                    </button>
+                    <button type="button" class="btn btn-danger" id="stop-button" onclick="stopPopulation()">
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="close-footer-button" onclick="closeProgressModal()" style="display: none;">
                         <i class="fas fa-times"></i> Close
                     </button>
                 </div>

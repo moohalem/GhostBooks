@@ -33,11 +33,9 @@ from app.services.irc import (
     close_session,
     create_irc_session,
     download_epub_only,
-    download_from_result,
     get_session_status,
     list_active_sessions,
     search_and_download,
-    search_epub_only,
 )
 from app.services.openlibrary import compare_author_books
 from config.config_manager import config_manager
@@ -885,6 +883,7 @@ def populate_missing_books_api():
 populate_progress = {
     "active": False,
     "cancelled": False,
+    "paused": False,
     "current_author": "",
     "processed": 0,
     "total": 0,
@@ -984,6 +983,51 @@ def populate_missing_books_stream():
             total_new_books_added = 0
 
             for i, author in enumerate(authors, 1):
+                # Check for cancellation
+                if populate_progress["cancelled"]:
+                    populate_progress.update(
+                        {
+                            "status": "cancelled",
+                            "message": "Population cancelled by user",
+                        }
+                    )
+                    yield f"data: {json.dumps(populate_progress)}\n\n"
+                    break
+
+                # Check for pause - wait until resumed or cancelled
+                if populate_progress["paused"] and not populate_progress["cancelled"]:
+                    # Send pause notification once
+                    pause_message = populate_progress.copy()
+                    pause_message.update(
+                        {
+                            "status": "paused",
+                            "message": f"Population paused at author {i}/{len(authors)}: {author}",
+                        }
+                    )
+                    yield f"data: {json.dumps(pause_message)}\n\n"
+
+                    # Wait for resume or cancellation without spamming the stream
+                    while (
+                        populate_progress["paused"]
+                        and not populate_progress["cancelled"]
+                    ):
+                        time.sleep(1)  # Check every second but don't send data
+
+                    # Send resume notification if not cancelled
+                    if (
+                        not populate_progress["cancelled"]
+                        and not populate_progress["paused"]
+                    ):
+                        resume_message = populate_progress.copy()
+                        resume_message.update(
+                            {
+                                "status": "processing",
+                                "message": f"Population resumed at author {i}/{len(authors)}: {author}",
+                            }
+                        )
+                        yield f"data: {json.dumps(resume_message)}\n\n"
+
+                # Check again for cancellation after potential pause
                 if populate_progress["cancelled"]:
                     populate_progress.update(
                         {
@@ -1107,6 +1151,30 @@ def cancel_populate_missing_books():
     global populate_progress
     populate_progress["cancelled"] = True
     return jsonify({"success": True, "message": "Cancellation requested"})
+
+
+@api_bp.route("/missing_books/populate/pause", methods=["POST"])
+def pause_populate_missing_books():
+    """API endpoint to pause ongoing missing books population."""
+    global populate_progress
+    if populate_progress["active"] and not populate_progress["cancelled"]:
+        populate_progress["paused"] = True
+        populate_progress["status"] = "paused"
+        return jsonify({"success": True, "message": "Population paused"})
+    else:
+        return jsonify({"success": False, "message": "No active population to pause"})
+
+
+@api_bp.route("/missing_books/populate/resume", methods=["POST"])
+def resume_populate_missing_books():
+    """API endpoint to resume paused missing books population."""
+    global populate_progress
+    if populate_progress["active"] and populate_progress["paused"]:
+        populate_progress["paused"] = False
+        populate_progress["status"] = "processing"
+        return jsonify({"success": True, "message": "Population resumed"})
+    else:
+        return jsonify({"success": False, "message": "No paused population to resume"})
 
 
 @api_bp.route("/missing_books/populate/status")
@@ -1399,49 +1467,153 @@ def search_and_download_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@api_bp.route("/irc/download", methods=["POST"])
-def download_from_result_endpoint():
-    """API endpoint to download a file from IRC search results."""
+@api_bp.route("/irc/search/author-level", methods=["POST"])
+def search_author_level_endpoint():
+    """API endpoint to perform author-level search (find unique books by author)."""
     try:
         data = request.get_json() or {}
         session_id = data.get("session_id")
-        download_command = data.get("download_command")
-        filename = data.get("filename")  # optional
+        author = data.get("author")
+        max_results = data.get("max_results", 50)
+        timeout_minutes = data.get("timeout_minutes", 3)
 
-        if not session_id or not download_command:
+        if not session_id or not author:
             return jsonify(
-                {
-                    "success": False,
-                    "error": "Session ID and download command are required",
-                }
+                {"success": False, "error": "Session ID and author are required"}
             ), 400
 
-        # Perform download
-        result = download_from_result(session_id, download_command, filename)
+        # Get the IRC session
+        from app.services.irc import get_session
 
-        return jsonify(result)
+        session = get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Perform author-level search
+        unique_books = session.search_author_level(author, max_results, timeout_minutes)
+
+        return jsonify(
+            {
+                "success": True,
+                "search_type": "author_level",
+                "author": author,
+                "unique_books": unique_books,
+                "total_found": len(unique_books),
+            }
+        )
+
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@api_bp.route("/irc/search/epub", methods=["POST"])
-def search_epub_only_endpoint():
-    """API endpoint to search for EPUB books only (openbooks pattern)."""
+@api_bp.route("/irc/search/title-level", methods=["POST"])
+def search_title_level_endpoint():
+    """API endpoint to perform title-level search (find specific book with server options)."""
     try:
         data = request.get_json() or {}
         session_id = data.get("session_id")
-        search_query = data.get("search_query") or data.get(
-            "author"
-        )  # Support both formats
-        max_results = data.get("max_results", 50)
+        author = data.get("author")
+        title = data.get("title")
+        max_results = data.get("max_results", 20)
+        timeout_minutes = data.get("timeout_minutes", 3)
 
-        if not session_id or not search_query:
+        if not session_id or not author or not title:
             return jsonify(
-                {"success": False, "error": "Session ID and search query are required"}
+                {
+                    "success": False,
+                    "error": "Session ID, author, and title are required",
+                }
             ), 400
 
-        # Perform EPUB-only search
-        result = search_epub_only(session_id, search_query, max_results)
+        # Get the IRC session
+        from app.services.irc import get_session
+
+        session = get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Perform title-level search
+        server_candidates = session.search_title_level(
+            author, title, max_results, timeout_minutes
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "search_type": "title_level",
+                "author": author,
+                "title": title,
+                "server_candidates": server_candidates,
+                "total_found": len(server_candidates),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/smart-search", methods=["POST"])
+def smart_search_and_download_endpoint():
+    """API endpoint for intelligent two-tier search and download with automatic fallback."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        author = data.get("author")
+        title = data.get(
+            "title"
+        )  # optional - if not provided, does author-level search
+        timeout_minutes = data.get("timeout_minutes", 3)
+        custom_filename = data.get("custom_filename")
+
+        if not session_id or not author:
+            return jsonify(
+                {"success": False, "error": "Session ID and author are required"}
+            ), 400
+
+        # Get the IRC session
+        from app.services.irc import get_session
+
+        session = get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Perform smart search and download
+        result = session.smart_search_and_download(
+            author, title, timeout_minutes, custom_filename
+        )
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/irc/download/fallback", methods=["POST"])
+def download_with_fallback_endpoint():
+    """API endpoint to download with automatic fallback across multiple candidates."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        candidates = data.get("candidates", [])
+        timeout_minutes = data.get("timeout_minutes", 3)
+        custom_filename = data.get("custom_filename")
+
+        if not session_id or not candidates:
+            return jsonify(
+                {"success": False, "error": "Session ID and candidates are required"}
+            ), 400
+
+        # Get the IRC session
+        from app.services.irc import get_session
+
+        session = get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Session not found"}), 404
+
+        # Perform download with fallback
+        result = session.download_with_fallback(
+            candidates, timeout_minutes, custom_filename
+        )
 
         return jsonify(result)
     except Exception as e:

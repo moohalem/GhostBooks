@@ -367,6 +367,8 @@ export class ProgressModalManager {
     constructor() {
         this.eventSource = null;
         this.isPopulationCancelled = false;
+        this.isPaused = false;
+        this.pausedAt = null;
     }
     
     openModal() {
@@ -422,15 +424,20 @@ export class ProgressModalManager {
         const errorSection = document.getElementById('error-section');
         if (errorSection) errorSection.style.display = 'none';
         
-        // Show cancel button, hide close button
-        const cancelButton = document.getElementById('cancel-button');
-        const closeButton = document.getElementById('close-button');
-        if (cancelButton) {
-            cancelButton.style.display = 'inline-block';
-            cancelButton.disabled = false;
-            cancelButton.innerHTML = '<i class="fas fa-stop"></i> Cancel';
+        // Show stop button, hide others
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const stopButton = document.getElementById('stop-button');
+        const closeFooterButton = document.getElementById('close-footer-button');
+        
+        if (pauseButton) pauseButton.style.display = 'none';
+        if (resumeButton) resumeButton.style.display = 'none';
+        if (stopButton) {
+            stopButton.style.display = 'inline-block';
+            stopButton.disabled = false;
+            stopButton.innerHTML = '<i class="fas fa-stop"></i> Stop';
         }
-        if (closeButton) closeButton.style.display = 'none';
+        if (closeFooterButton) closeFooterButton.style.display = 'none';
     }
     
     startStreaming() {
@@ -449,6 +456,7 @@ export class ProgressModalManager {
         this.eventSource.onopen = (event) => {
             console.log('EventSource connection opened');
             this.addToLog('Connected to server successfully', 'success');
+            this.showPauseButton(); // Show pause button when population starts
         };
         
         this.eventSource.onmessage = (event) => {
@@ -748,12 +756,70 @@ ${data.errors && data.errors.length > 0 ? `⚠️ ${data.errors.length} errors o
         if (closeButton) closeButton.style.display = 'inline-block';
     }
     
-    async cancel() {
+    async pause() {
+        if (this.isPaused || this.isPopulationCancelled) {
+            return;
+        }
+        
+        this.isPaused = true;
+        this.pausedAt = Date.now();
+        
+        try {
+            const response = await fetch('/api/missing_books/populate/pause', {
+                method: 'POST'
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.addToLog('Population paused', 'warning');
+                this.showResumeButton();
+            } else {
+                showToast('Failed to pause population', 'danger');
+                this.isPaused = false;
+                this.pausedAt = null;
+            }
+        } catch (error) {
+            console.error('Error pausing population:', error);
+            showToast('Error pausing population', 'danger');
+            this.isPaused = false;
+            this.pausedAt = null;
+        }
+    }
+    
+    async resume() {
+        if (!this.isPaused || this.isPopulationCancelled) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/missing_books/populate/resume', {
+                method: 'POST'
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.isPaused = false;
+                this.pausedAt = null;
+                this.addToLog('Population resumed', 'success');
+                this.showPauseButton();
+            } else {
+                showToast('Failed to resume population', 'danger');
+            }
+        } catch (error) {
+            console.error('Error resuming population:', error);
+            showToast('Error resuming population', 'danger');
+        }
+    }
+    
+    async stop() {
         if (this.isPopulationCancelled) {
             return;
         }
         
         this.isPopulationCancelled = true;
+        this.isPaused = false;
         
         try {
             const response = await fetch('/api/missing_books/populate/cancel', {
@@ -763,34 +829,93 @@ ${data.errors && data.errors.length > 0 ? `⚠️ ${data.errors.length} errors o
             const data = await response.json();
             
             if (data.success) {
-                this.addToLog('Cancellation request sent...', 'warning');
-                
-                // Disable the cancel button
-                const cancelButton = document.getElementById('cancel-button');
-                cancelButton.disabled = true;
-                cancelButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cancelling...';
+                this.addToLog('Stop request sent...', 'warning');
+                this.showStoppingButton();
             } else {
-                showToast('Failed to cancel population', 'danger');
+                showToast('Failed to stop population', 'danger');
                 this.isPopulationCancelled = false;
             }
         } catch (error) {
-            console.error('Error cancelling population:', error);
-            showToast('Error cancelling population', 'danger');
+            console.error('Error stopping population:', error);
+            showToast('Error stopping population', 'danger');
             this.isPopulationCancelled = false;
         }
     }
     
+    showPauseButton() {
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const stopButton = document.getElementById('stop-button');
+        
+        if (pauseButton) pauseButton.style.display = 'inline-block';
+        if (resumeButton) resumeButton.style.display = 'none';
+        if (stopButton) stopButton.style.display = 'inline-block';
+    }
+    
+    showResumeButton() {
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const stopButton = document.getElementById('stop-button');
+        
+        if (pauseButton) pauseButton.style.display = 'none';
+        if (resumeButton) resumeButton.style.display = 'inline-block';
+        if (stopButton) stopButton.style.display = 'inline-block';
+    }
+    
+    showStoppingButton() {
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const stopButton = document.getElementById('stop-button');
+        
+        if (pauseButton) pauseButton.style.display = 'none';
+        if (resumeButton) resumeButton.style.display = 'none';
+        if (stopButton) {
+            stopButton.disabled = true;
+            stopButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
+        }
+    }
+    
+    showCloseButton() {
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const stopButton = document.getElementById('stop-button');
+        const closeFooterButton = document.getElementById('close-footer-button');
+        
+        if (pauseButton) pauseButton.style.display = 'none';
+        if (resumeButton) resumeButton.style.display = 'none';
+        if (stopButton) stopButton.style.display = 'none';
+        if (closeFooterButton) closeFooterButton.style.display = 'inline-block';
+    }
+    
+    /**
+     * Close the progress modal properly
+     */
     close() {
-        // Close event source if still open
+        // Close event source if it exists
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
         }
         
-        // Hide modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('populationProgressModal'));
-        if (modal) {
-            modal.hide();
+        // Get the modal element
+        const modalElement = document.getElementById('populationProgressModal');
+        if (modalElement) {
+            // Get Bootstrap modal instance
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modal) {
+                modal.hide();
+            }
+            
+            // Clean up any lingering backdrops
+            setTimeout(() => {
+                const backdrops = document.querySelectorAll('.modal-backdrop');
+                backdrops.forEach(backdrop => backdrop.remove());
+                
+                // Ensure body doesn't have modal-open class
+                document.body.classList.remove('modal-open');
+                document.body.style.overflow = '';
+                document.body.style.paddingRight = '';
+            }, 300);
         }
     }
     

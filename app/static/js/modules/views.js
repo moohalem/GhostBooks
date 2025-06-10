@@ -222,6 +222,12 @@ export async function loadAuthorBooks(accordionBody, authorName) {
                     </div>
                     <div class="d-flex align-items-center ms-2">
                         ${book.status === 'missing_local' ? `
+                            <button class="btn btn-sm btn-outline-success me-2" 
+                                    data-irc-search-title="${escapeHtml(authorName)}"
+                                    data-book-title="${escapeHtml(book.title)}"
+                                    title="Search this book on IRC">
+                                <i class="fas fa-search"></i> Search on IRC
+                            </button>
                             <button class="btn btn-sm btn-outline-danger me-2" 
                                     onclick="handleIgnoreBook('${escapeHtml(authorName)}', '${escapeHtml(book.title)}')"
                                     title="Ignore this missing book">
@@ -311,6 +317,14 @@ export async function loadAuthorsData(page = 1, search = '') {
                     <div class="d-flex align-items-center flex-grow-1">
                         <i class="fas fa-user me-2"></i>
                         <strong>${escapeHtml(author.author)}</strong>
+                        ${author.missing_books > 0 ? 
+                            `<button class="btn btn-sm btn-outline-primary ms-3" 
+                                     data-irc-search-author="${escapeHtml(author.author)}"
+                                     onclick="event.stopPropagation();" 
+                                     title="Search missing books on IRC">
+                                 <i class="fas fa-search"></i> Search on IRC
+                             </button>` : ''
+                        }
                     </div>
                     <div class="d-flex align-items-center">
                         <span class="badge bg-primary me-2">${author.total_books} books</span>
@@ -401,6 +415,11 @@ async function loadMissingBooksData() {
                                         <small class="text-muted d-block"><i class="fas fa-database"></i> ${book.source || 'legacy'}</small>
                                     </div>
                                     <div class="ms-2">
+                                        <button class="btn btn-sm btn-outline-success me-1" 
+                                                onclick="searchTitleOnIRC('${escapeHtml(author)}', '${escapeHtml(book.title)}')"
+                                                title="Search this book on IRC">
+                                            <i class="fas fa-search"></i>
+                                        </button>
                                         <button class="btn btn-sm btn-outline-danger" 
                                                 onclick="handleIgnoreBook('${escapeHtml(author)}', '${escapeHtml(book.title)}')"
                                                 title="Ignore this book">

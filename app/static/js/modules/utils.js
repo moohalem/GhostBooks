@@ -354,3 +354,39 @@ export class Autocomplete {
         }
     }
 }
+
+/**
+ * Show a Bootstrap modal
+ * @param {string} modalId - ID of the modal to show
+ */
+export function showModal(modalId) {
+    const modalElement = document.getElementById(modalId);
+    if (modalElement) {
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+        return modal;
+    } else {
+        console.error(`Modal with ID '${modalId}' not found`);
+        return null;
+    }
+}
+
+/**
+ * Hide a Bootstrap modal
+ * @param {string} modalId - ID of the modal to hide
+ */
+export function hideModal(modalId) {
+    const modalElement = document.getElementById(modalId);
+    if (modalElement) {
+        const modal = bootstrap.Modal.getInstance(modalElement);
+        if (modal) {
+            modal.hide();
+        } else {
+            // If no instance exists, create one and hide it
+            const newModal = new bootstrap.Modal(modalElement);
+            newModal.hide();
+        }
+    } else {
+        console.error(`Modal with ID '${modalId}' not found`);
+    }
+}

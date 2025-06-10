@@ -282,3 +282,121 @@ export async function verifyMetadataPath() {
 export async function initializeDatabase() {
     return await apiRequest('/api/initialize-database', { method: 'POST' });
 }
+
+/**
+ * IRC Search API Functions
+ */
+
+/**
+ * Create a new IRC session
+ * @returns {Promise<Object>} Session creation result
+ */
+export async function createIRCSession() {
+    return await apiRequest('/api/irc/sessions', {
+        method: 'POST'
+    });
+}
+
+/**
+ * Get IRC session status
+ * @param {string} sessionId - IRC session ID
+ * @returns {Promise<Object>} Session status
+ */
+export async function getIRCSessionStatus(sessionId) {
+    return await apiRequest(`/api/irc/sessions/${sessionId}`);
+}
+
+/**
+ * Close IRC session
+ * @param {string} sessionId - IRC session ID
+ * @returns {Promise<Object>} Close result
+ */
+export async function closeIRCSession(sessionId) {
+    return await apiRequest(`/api/irc/sessions/${sessionId}/close`, {
+        method: 'POST'
+    });
+}
+
+/**
+ * Perform author-level IRC search (find unique books by author)
+ * @param {string} sessionId - IRC session ID
+ * @param {string} author - Author name
+ * @param {number} maxResults - Maximum results to return
+ * @param {number} timeoutMinutes - Search timeout in minutes
+ * @returns {Promise<Object>} Search results
+ */
+export async function searchAuthorLevelIRC(sessionId, author, maxResults = 50, timeoutMinutes = 3) {
+    return await apiRequest('/api/irc/search/author-level', {
+        method: 'POST',
+        body: JSON.stringify({
+            session_id: sessionId,
+            author: author,
+            max_results: maxResults,
+            timeout_minutes: timeoutMinutes
+        })
+    });
+}
+
+/**
+ * Perform title-level IRC search (find specific book with server options)
+ * @param {string} sessionId - IRC session ID
+ * @param {string} author - Author name
+ * @param {string} title - Book title
+ * @param {number} maxResults - Maximum results to return
+ * @param {number} timeoutMinutes - Search timeout in minutes
+ * @returns {Promise<Object>} Search results
+ */
+export async function searchTitleLevelIRC(sessionId, author, title, maxResults = 20, timeoutMinutes = 3) {
+    return await apiRequest('/api/irc/search/title-level', {
+        method: 'POST',
+        body: JSON.stringify({
+            session_id: sessionId,
+            author: author,
+            title: title,
+            max_results: maxResults,
+            timeout_minutes: timeoutMinutes
+        })
+    });
+}
+
+/**
+ * Perform smart search and download with automatic fallback
+ * @param {string} sessionId - IRC session ID
+ * @param {string} author - Author name
+ * @param {string} title - Book title (optional)
+ * @param {number} timeoutMinutes - Search timeout in minutes
+ * @param {string} customFilename - Custom filename for download
+ * @returns {Promise<Object>} Search and download result
+ */
+export async function smartSearchAndDownloadIRC(sessionId, author, title = null, timeoutMinutes = 3, customFilename = null) {
+    return await apiRequest('/api/irc/smart-search', {
+        method: 'POST',
+        body: JSON.stringify({
+            session_id: sessionId,
+            author: author,
+            title: title,
+            timeout_minutes: timeoutMinutes,
+            custom_filename: customFilename
+        })
+    });
+}
+
+/**
+ * Download with fallback across multiple candidates
+ * @param {string} sessionId - IRC session ID
+ * @param {Array} candidates - Array of download candidates
+ * @param {number} timeoutMinutes - Download timeout in minutes
+ * @param {string} customFilename - Custom filename for download
+ * @returns {Promise<Object>} Download result
+ */
+export async function downloadWithFallbackIRC(sessionId, candidates, timeoutMinutes = 3, customFilename = null) {
+    return await apiRequest('/api/irc/download/fallback', {
+        method: 'POST',
+        body: JSON.stringify({
+            session_id: sessionId,
+            candidates: candidates,
+            timeout_minutes: timeoutMinutes,
+            custom_filename: customFilename
+        })
+    });
+}
